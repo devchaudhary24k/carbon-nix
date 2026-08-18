@@ -1,0 +1,83 @@
+{
+  "nodes": {
+    "dotfiles": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787000222,
+        "narHash": "sha256-Hc2QNqduPf2s7KB61Pj1YmnCIWFMw/yaoSrCTVYG4Tw=",
+        "owner": "devchaudhary24k",
+        "repo": "dotfiles",
+        "rev": "9e51b434a2c7f48f3fa1c6b3034e138b1b52ecee",
+        "type": "github"
+      },
+      "original": {
+        "owner": "devchaudhary24k",
+        "repo": "dotfiles",
+        "type": "github"
+      }
+    },
+    "home-manager": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786924861,
+        "narHash": "sha256-hftabkb+73OcGzvwFAjCiQorAhprs9TnU1+FkGO5CIw=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "09ae1b85a6db412d841d60f924b23f881f0d0a38",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "ref": "release-26.05",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
+    "lazyvim-starter": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1733936199,
+        "narHash": "sha256-QrpnlDD4r1X4C8PqBhQ+S3ar5C+qDrU1Jm/lPqyMIFM=",
+        "owner": "LazyVim",
+        "repo": "starter",
+        "rev": "803bc181d7c0d6d5eeba9274d9be49b287294d99",
+        "type": "github"
+      },
+      "original": {
+        "owner": "LazyVim",
+        "repo": "starter",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1786943417,
+        "narHash": "sha256-b4qgjdFtlz5TAZ1Hi7DFJeqX3sjaDUnrwr9OO+O1rM0=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0dd31db7e6dbf9ce05697c4545f6fe01accec994",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "dotfiles": "dotfiles",
+        "home-manager": "home-manager",
+        "lazyvim-starter": "lazyvim-starter",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
