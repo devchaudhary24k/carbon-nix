@@ -97,6 +97,7 @@
     btrfs-progs
     clang
     cmake
+    codex
     curl
     delta
     dmidecode
@@ -129,6 +130,7 @@
     ninja
     nix-output-monitor
     nmap
+    nodejs_24
     nvd
     openssl
     pciutils
