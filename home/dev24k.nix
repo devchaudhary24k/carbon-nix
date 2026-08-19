@@ -12,7 +12,10 @@
   xdg = {
     enable = true;
     configFile = {
-      "fish".source = "${inputs.dotfiles}/home/fish/.config/fish";
+      "fish" = {
+        source = "${inputs.dotfiles}/home/fish/.config/fish";
+        recursive = true;
+      };
       "git/ignore".source = "${inputs.dotfiles}/home/git/.config/git/ignore";
       "nvim".source = inputs.lazyvim-starter;
       "starship.toml".source = "${inputs.dotfiles}/home/starship/.config/starship.toml";
