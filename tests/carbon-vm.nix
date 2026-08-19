@@ -73,6 +73,25 @@ pkgs.testers.runNixOSTest {
     machine.succeed("systemctl is-enabled docker-prune.timer | grep -x enabled")
     machine.succeed("systemctl is-enabled carbon-health.timer | grep -x enabled")
     machine.succeed("command -v carbon-health-check")
+    machine.succeed("install -d -m 0700 /tmp/carbon-health-credentials /var/lib/carbon-monitor")
+    machine.succeed(
+        "printf '%s\\n' 'https://uptime.betterstack.com/api/v1/heartbeat/test-token' "
+        "> /tmp/carbon-health-credentials/heartbeat-url"
+    )
+    health_status, health_output = machine.execute(
+        "CREDENTIALS_DIRECTORY=/tmp/carbon-health-credentials "
+        "CARBON_HEALTH_DRY_RUN=1 carbon-health-check "
+        "> /tmp/carbon-health.stdout 2> /tmp/carbon-health.stderr"
+    )
+    if health_status != 0:
+        stderr = machine.succeed("cat /tmp/carbon-health.stderr")
+        stdout = machine.succeed("cat /tmp/carbon-health.stdout")
+        raise Exception(
+            f"carbon-health-check failed with status {health_status}\n"
+            f"stdout:\n{stdout}\nstderr:\n{stderr}"
+        )
+    machine.succeed("test -s /var/lib/carbon-monitor/last-report")
+    machine.succeed("! grep -q 'awk: fatal' /tmp/carbon-health.stderr")
 
     for command in [
         "nh", "nvd", "nom", "lsof", "strace", "iotop", "ncdu",

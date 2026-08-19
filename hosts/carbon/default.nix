@@ -2,7 +2,6 @@
 
 {
   imports = [
-    ./hardware-configuration.nix
     ../../modules/databases.nix
     ../../modules/health-monitor.nix
     ../../modules/headless-dev.nix

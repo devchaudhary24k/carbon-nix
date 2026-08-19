@@ -33,9 +33,17 @@ let
       heartbeat_url=$(tr -d '\r\n' < "$credential_file")
       heartbeat_url="''${heartbeat_url%/}"
       case "$heartbeat_url" in
-        https://uptime.betterstack.com/api/v1/heartbeat/*) ;;
+        https://uptime.betterstack.com/api/v1/heartbeat/*)
+          heartbeat_token="''${heartbeat_url#https://uptime.betterstack.com/api/v1/heartbeat/}"
+          ;;
         *)
           echo "The configured heartbeat URL is not a Better Stack heartbeat URL." >&2
+          exit 0
+          ;;
+      esac
+      case "$heartbeat_token" in
+        ""|*/*|*[[:space:]]*)
+          echo "The configured Better Stack heartbeat URL has an invalid token." >&2
           exit 0
           ;;
       esac
@@ -86,7 +94,7 @@ let
       scrub_timer_count=$(
         systemctl list-unit-files 'btrfs-scrub-*.timer' \
           --state=enabled --no-legend --no-pager |
-          awk 'END { print NR + 0 }'
+          awk 'END { print NR + 0 }' || true
       )
       if (( scrub_timer_count < 2 )); then
         add_issue "TIMER: expected two enabled Btrfs scrub timers, found $scrub_timer_count"
@@ -155,8 +163,8 @@ let
 
       load_15=$(awk '{ print $3 }' /proc/loadavg)
       cpu_cores=$(nproc)
-      if awk -v load="$load_15" -v cores="$cpu_cores" \
-        'BEGIN { exit !(load > cores * 2) }'; then
+      if awk -v load_average="$load_15" -v cores="$cpu_cores" \
+        'BEGIN { exit !(load_average > cores * 2) }'; then
         add_issue "LOAD: 15-minute load $load_15 exceeds twice the $cpu_cores CPU cores"
       fi
 
@@ -240,16 +248,26 @@ let
           printf 'Current: CPU=%s%% memory=%s%% load15=%s disks=%s\n' \
             "$cpu_percent" "$memory_percent" "$load_15" "''${disk_summary[*]}"
         } > "$report_file"
-        endpoint="$heartbeat_url/fail"
+        endpoint="$heartbeat_url/1"
+        curl_body=(--data-binary "@$report_file")
       else
         printf 'carbon healthy: CPU=%s%% memory=%s%% load15=%s disks=%s at %s\n' \
           "$cpu_percent" "$memory_percent" "$load_15" \
           "''${disk_summary[*]}" "$(date --iso-8601=seconds)" > "$report_file"
         endpoint="$heartbeat_url"
+        curl_body=()
       fi
 
-      if ! curl --fail --silent --show-error --max-time 10 --retry 3 \
-        --data-binary "@$report_file" "$endpoint" >/dev/null; then
+      cat "$report_file"
+
+      # Exercise every local check in the VM test without contacting an
+      # external heartbeat endpoint.
+      if [[ ''${CARBON_HEALTH_DRY_RUN:-0} == 1 ]]; then
+        exit 0
+      fi
+
+      if ! curl --fail-with-body --silent --show-error --max-time 10 --retry 3 \
+        "''${curl_body[@]}" "$endpoint" >/dev/null; then
         echo "Unable to deliver the Better Stack heartbeat; a missed ping will alert externally." >&2
       fi
 

@@ -42,7 +42,7 @@
       nixosConfigurations.carbon = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit inputs; };
-        modules = carbonModules;
+        modules = [ ./hosts/carbon/hardware-configuration.nix ] ++ carbonModules;
       };
 
       checks.${system}.carbon-vm = import ./tests/carbon-vm.nix {
