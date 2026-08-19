@@ -34,6 +34,7 @@
     isNormalUser = true;
     description = "Development user";
     shell = pkgs.fish;
+    linger = true;
     extraGroups = [
       "docker"
       "wheel"
