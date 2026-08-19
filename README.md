@@ -74,6 +74,9 @@ Snapshots run daily. The SSD keeps 3 daily snapshots of root and home;
 incremental copies on the HDD keep 14 daily, 8 weekly, and 6 monthly snapshots.
 `/nix`, logs, Docker data, and swap are separate subvolumes and are deliberately
 not snapshotted. Database dumps still run weekly on the HDD.
+Each PostgreSQL, MariaDB, and Valkey service retains its five newest backups.
+PostgreSQL 18 includes pgvector; enable it inside each application database with
+`CREATE EXTENSION vector;`.
 
 ## Diagnostics
 

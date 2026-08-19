@@ -1,11 +1,27 @@
 { pkgs, ... }:
 
+let
+  postgresqlPackage = pkgs.postgresql_18;
+
+  # Backup filenames never contain spaces. Sort newest first and delete every
+  # file after the fifth successful backup.
+  keepNewestFive = pattern: ''
+    ${pkgs.findutils}/bin/find "$backup_dir" -maxdepth 1 -type f \
+      -name '${pattern}' -printf '%T@ %p\0' \
+      | ${pkgs.coreutils}/bin/sort -z -nr \
+      | ${pkgs.coreutils}/bin/tail -z -n +6 \
+      | ${pkgs.coreutils}/bin/cut -z -d ' ' -f 2- \
+      | ${pkgs.findutils}/bin/xargs -0 -r ${pkgs.coreutils}/bin/rm -f --
+  '';
+in
+
 {
   services.postgresql = {
     enable = true;
     # Pin the major version so a routine update cannot silently change the
     # on-disk database format.
-    package = pkgs.postgresql_17;
+    package = postgresqlPackage;
+    extensions = postgresqlPackages: [ postgresqlPackages.pgvector ];
   };
 
   services.mysql = {
@@ -42,18 +58,18 @@
         UMask = "0077";
       };
       script = ''
-        set -eu
+        set -euo pipefail
         backup_dir=/srv/bulk/backups/databases/postgresql
         ${pkgs.coreutils}/bin/install -d -m 0700 "$backup_dir"
         stamp=$(${pkgs.coreutils}/bin/date +%Y-%m-%d_%H-%M-%S)
         output="$backup_dir/all-$stamp.sql.zst"
         temp="$output.tmp"
         trap '${pkgs.coreutils}/bin/rm -f "$temp"' EXIT
-        ${pkgs.postgresql_17}/bin/pg_dumpall \
+        ${postgresqlPackage}/bin/pg_dumpall \
           | ${pkgs.zstd}/bin/zstd -T0 -6 > "$temp"
         ${pkgs.coreutils}/bin/mv "$temp" "$output"
         trap - EXIT
-        ${pkgs.findutils}/bin/find "$backup_dir" -type f -name 'all-*.sql.zst' -mtime +42 -delete
+        ${keepNewestFive "all-*.sql.zst"}
       '';
     };
 
@@ -70,7 +86,7 @@
         UMask = "0077";
       };
       script = ''
-        set -eu
+        set -euo pipefail
         backup_dir=/srv/bulk/backups/databases/mariadb
         ${pkgs.coreutils}/bin/install -d -m 0700 "$backup_dir"
         stamp=$(${pkgs.coreutils}/bin/date +%Y-%m-%d_%H-%M-%S)
@@ -82,7 +98,7 @@
           | ${pkgs.zstd}/bin/zstd -T0 -6 > "$temp"
         ${pkgs.coreutils}/bin/mv "$temp" "$output"
         trap - EXIT
-        ${pkgs.findutils}/bin/find "$backup_dir" -type f -name 'all-*.sql.zst' -mtime +42 -delete
+        ${keepNewestFive "all-*.sql.zst"}
       '';
     };
 
@@ -99,12 +115,12 @@
         UMask = "0077";
       };
       script = ''
-        set -eu
+        set -euo pipefail
         backup_dir=/srv/bulk/backups/databases/valkey
         ${pkgs.coreutils}/bin/install -d -m 0700 "$backup_dir"
         stamp=$(${pkgs.coreutils}/bin/date +%Y-%m-%d_%H-%M-%S)
         ${pkgs.valkey}/bin/valkey-cli --rdb "$backup_dir/valkey-$stamp.rdb"
-        ${pkgs.findutils}/bin/find "$backup_dir" -type f -name 'valkey-*.rdb' -mtime +42 -delete
+        ${keepNewestFive "valkey-*.rdb"}
       '';
     };
   };
