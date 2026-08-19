@@ -67,7 +67,19 @@
     openFirewall = true;
   };
 
-  virtualisation.docker.enable = true;
+  virtualisation.docker = {
+    enable = true;
+    autoPrune = {
+      enable = true;
+      dates = "Sun 05:30";
+      # Remove only objects unused for at least seven days. Volumes are never
+      # pruned automatically because they can contain development data.
+      flags = [
+        "--all"
+        "--filter=until=168h"
+      ];
+    };
+  };
 
   networking.firewall = {
     enable = true;
@@ -100,15 +112,24 @@
     gnumake
     gh
     htop
+    hyperfine
     inetutils
+    iotop
+    iperf3
     jq
     just
     lazydocker
     lazygit
     lshw
     lm_sensors
+    lsof
     mtr
+    ncdu
+    nh
     ninja
+    nix-output-monitor
+    nmap
+    nvd
     openssl
     pciutils
     pkg-config
@@ -122,14 +143,20 @@
     sqlite
     starship
     stow
+    socat
+    strace
     tcpdump
     tmux
+    tokei
     tree
     tree-sitter
     unzip
     usbutils
     uv
+    watchexec
+    websocat
     wget
+    xh
     zip
     zoxide
   ];

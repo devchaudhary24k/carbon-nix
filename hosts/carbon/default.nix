@@ -4,6 +4,7 @@
   imports = [
     ./hardware-configuration.nix
     ../../modules/databases.nix
+    ../../modules/health-monitor.nix
     ../../modules/headless-dev.nix
     ../../modules/maintenance.nix
     ../../modules/observability.nix

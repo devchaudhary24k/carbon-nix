@@ -20,12 +20,12 @@
     };
   };
 
-  outputs = inputs@{ home-manager, nixpkgs, ... }: {
-    nixosConfigurations.carbon = nixpkgs.lib.nixosSystem {
+  outputs = inputs@{ home-manager, nixpkgs, ... }:
+    let
       system = "x86_64-linux";
-      specialArgs = { inherit inputs; };
+      pkgs = nixpkgs.legacyPackages.${system};
 
-      modules = [
+      carbonModules = [
         ./hosts/carbon
         home-manager.nixosModules.home-manager
         {
@@ -37,6 +37,16 @@
           };
         }
       ];
+    in
+    {
+      nixosConfigurations.carbon = nixpkgs.lib.nixosSystem {
+        inherit system;
+        specialArgs = { inherit inputs; };
+        modules = carbonModules;
+      };
+
+      checks.${system}.carbon-vm = import ./tests/carbon-vm.nix {
+        inherit carbonModules pkgs;
+      };
     };
-  };
 }

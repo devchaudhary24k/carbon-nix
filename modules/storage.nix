@@ -45,6 +45,17 @@
 
   boot.kernel.sysctl."vm.swappiness" = 100;
 
+  # Scrubbing the root mount checks the entire SSD Btrfs filesystem, including
+  # its home subvolume. The HDD is a separate Btrfs filesystem.
+  services.btrfs.autoScrub = {
+    enable = true;
+    interval = "monthly";
+    fileSystems = [
+      "/"
+      "/srv/bulk"
+    ];
+  };
+
   # Create these only after the HDD really mounted. This prevents accidental
   # writes to the small SSD when the HDD is missing.
   systemd.services.bulk-directory-setup = {
@@ -61,6 +72,9 @@
     script = ''
       install -d -m 0755 -o root -g root /srv/bulk/backups
       install -d -m 0755 -o root -g root /srv/bulk/backups/databases
+      install -d -m 0700 -o postgres -g postgres /srv/bulk/backups/databases/postgresql
+      install -d -m 0700 -o root -g root /srv/bulk/backups/databases/mariadb
+      install -d -m 0700 -o root -g root /srv/bulk/backups/databases/valkey
       install -d -m 0755 -o root -g root /srv/bulk/snapshots
       install -d -m 0755 -o root -g root /srv/bulk/snapshots/carbon
       install -d -m 2775 -o dev24k -g users /srv/bulk/datasets

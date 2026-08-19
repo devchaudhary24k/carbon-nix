@@ -51,6 +51,20 @@ Reboot, then join Tailscale without enabling Tailscale SSH:
 sudo tailscale up --ssh=false
 ```
 
+To enable the optional aggregate Better Stack health heartbeat, create one
+heartbeat in Better Stack and run:
+
+```bash
+sudo /etc/nixos/setup-monitoring.sh
+```
+
+The heartbeat URL is entered without terminal echo and stored outside Git at
+`/etc/carbon-monitor/heartbeat-url` with root-only permissions. Every five
+minutes Carbon reports failed units, critical service and database health,
+mounts, 90% disk usage, sustained CPU pressure, memory/load pressure, stale
+backups and snapshots, SMART warnings, and recent OOM events. A missing ping
+also detects when the whole machine is unreachable.
+
 ## Normal changes
 
 Edit files in `/etc/nixos`, commit them, then apply:
@@ -77,6 +91,15 @@ not snapshotted. Database dumps still run weekly on the HDD.
 Each PostgreSQL, MariaDB, and Valkey service retains its five newest backups.
 PostgreSQL 18 includes pgvector; enable it inside each application database with
 `CREATE EXTENSION vector;`.
+
+Both Btrfs filesystems are scrubbed monthly. Docker objects unused for seven
+days are pruned weekly; Docker volumes are deliberately never auto-pruned.
+
+Run the disposable service VM test with
+`nix build path:.#checks.x86_64-linux.carbon-vm --no-link`. It verifies boot, SSH,
+Docker, all databases, pgvector, Home Manager, and backup retention without
+touching carbon's physical disks. Plain `nix flake check` will also validate the
+physical hardware configuration, which the installer generates for carbon.
 
 ## Diagnostics
 
