@@ -75,6 +75,9 @@ in
     C_INCLUDE_PATH = nodeNativeIncludePath;
     CPLUS_INCLUDE_PATH = nodeNativeIncludePath;
     PKG_CONFIG_PATH = nodeNativePkgConfigPath;
+    PUPPETEER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true";
+    PUPPETEER_SKIP_DOWNLOAD = "true";
   };
 
   systemd.user.services.ssh-agent.serviceConfig = {
@@ -124,6 +127,7 @@ in
     btop
     btrfs-progs
     clang
+    chromium
     cmake
     codex
     curl
