@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    nixpkgs-prisma5.url = "github:NixOS/nixpkgs/5005449a6ed0451dbe6d976a254091445e984047";
 
     home-manager = {
       url = "github:nix-community/home-manager/release-26.05";

@@ -1,6 +1,8 @@
-{ lib, pkgs, ... }:
+{ inputs, lib, pkgs, ... }:
 
 let
+  prismaEngines =
+    inputs.nixpkgs-prisma5.legacyPackages.${pkgs.stdenv.hostPlatform.system}.prisma-engines;
   nodeNativeLibraries = with pkgs; [
     cairo
     fontconfig
@@ -75,6 +77,10 @@ in
     C_INCLUDE_PATH = nodeNativeIncludePath;
     CPLUS_INCLUDE_PATH = nodeNativeIncludePath;
     PKG_CONFIG_PATH = nodeNativePkgConfigPath;
+    PRISMA_FMT_BINARY = "${prismaEngines}/bin/prisma-fmt";
+    PRISMA_QUERY_ENGINE_BINARY = "${prismaEngines}/bin/query-engine";
+    PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
+    PRISMA_SCHEMA_ENGINE_BINARY = "${prismaEngines}/bin/schema-engine";
     PUPPETEER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true";
     PUPPETEER_SKIP_DOWNLOAD = "true";
