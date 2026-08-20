@@ -15,6 +15,8 @@ let
     pango
     pixman
   ];
+  nodeNativeIncludePath =
+    lib.makeSearchPathOutput "dev" "include" nodeNativeLibraries;
   nodeNativePkgConfigPath =
     lib.makeSearchPathOutput "dev" "lib/pkgconfig" nodeNativeLibraries;
 in
@@ -44,6 +46,8 @@ in
         Environment="PATH=${pkgs.nodejs_24}/bin:/run/wrappers/bin:/etc/profiles/per-user/dev24k/bin:/run/current-system/sw/bin"
         Environment="NIX_LD=/run/current-system/sw/share/nix-ld/lib/ld.so"
         Environment="NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib"
+        Environment="C_INCLUDE_PATH=${nodeNativeIncludePath}"
+        Environment="CPLUS_INCLUDE_PATH=${nodeNativeIncludePath}"
         Environment="PKG_CONFIG_PATH=${nodeNativePkgConfigPath}"
       '';
     };

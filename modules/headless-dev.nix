@@ -15,6 +15,10 @@ let
     pango
     pixman
   ];
+  nodeNativeIncludePath =
+    lib.makeSearchPathOutput "dev" "include" nodeNativeLibraries;
+  nodeNativePkgConfigPath =
+    lib.makeSearchPathOutput "dev" "lib/pkgconfig" nodeNativeLibraries;
 in
 
 {
@@ -67,8 +71,11 @@ in
     yazi.enable = true;
   };
 
-  environment.sessionVariables.PKG_CONFIG_PATH =
-    lib.makeSearchPathOutput "dev" "lib/pkgconfig" nodeNativeLibraries;
+  environment.sessionVariables = {
+    C_INCLUDE_PATH = nodeNativeIncludePath;
+    CPLUS_INCLUDE_PATH = nodeNativeIncludePath;
+    PKG_CONFIG_PATH = nodeNativePkgConfigPath;
+  };
 
   systemd.user.services.ssh-agent.serviceConfig = {
     ExecStartPre = lib.mkForce "${pkgs.coreutils}/bin/rm -f %t/ssh-agent.socket";
