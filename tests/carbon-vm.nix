@@ -1,4 +1,4 @@
-{ carbonModules, pkgs }:
+{ carbonModules, inputs, pkgs }:
 
 pkgs.testers.runNixOSTest {
   name = "carbon-vm";
@@ -6,6 +6,8 @@ pkgs.testers.runNixOSTest {
   nodes.machine =
     { lib, ... }:
     {
+      _module.args = { inherit inputs; };
+
       imports = carbonModules;
 
       virtualisation = {

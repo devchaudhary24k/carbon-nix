@@ -47,7 +47,7 @@
       };
 
       checks.${system}.carbon-vm = import ./tests/carbon-vm.nix {
-        inherit carbonModules pkgs;
+        inherit carbonModules inputs pkgs;
       };
     };
 }
