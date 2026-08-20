@@ -69,12 +69,29 @@
         "type": "github"
       }
     },
+    "nixpkgs-prisma5": {
+      "locked": {
+        "lastModified": 1729238749,
+        "narHash": "sha256-lB28WUOn7y/v9Wvk94iBBWZ0IyhmrgZS0Do0WFqsH6Q=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "5005449a6ed0451dbe6d976a254091445e984047",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "5005449a6ed0451dbe6d976a254091445e984047",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "dotfiles": "dotfiles",
         "home-manager": "home-manager",
         "lazyvim-starter": "lazyvim-starter",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "nixpkgs-prisma5": "nixpkgs-prisma5"
       }
     }
   },
