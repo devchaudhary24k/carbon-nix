@@ -39,9 +39,6 @@ in
       "nvim".source = inputs.lazyvim-starter;
       "starship.toml".source = "${inputs.dotfiles}/home/starship/.config/starship.toml";
 
-      # T3 starts from the lingering user systemd manager, not a login shell.
-      # Pin Nix Node/npm for its updater and pass nix-ld through to terminals
-      # so project-specific Node versions downloaded by fnm work on NixOS.
       "systemd/user/t3code.service.d/10-nixos-compat.conf".text = ''
         [Service]
         Environment="PATH=${pkgs.nodejs_24}/bin:/run/wrappers/bin:/etc/profiles/per-user/dev24k/bin:/run/current-system/sw/bin"

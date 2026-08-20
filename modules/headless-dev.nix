@@ -1,8 +1,6 @@
 { lib, pkgs, ... }:
 
 let
-  # Native libraries used when Node packages such as canvas cannot download a
-  # prebuilt binary and fall back to node-gyp compilation.
   nodeNativeLibraries = with pkgs; [
     cairo
     fontconfig
@@ -37,8 +35,6 @@ in
   programs = {
     direnv.enable = true;
 
-    # fnm downloads ordinary dynamically linked Linux Node binaries. Let
-    # those binaries run on NixOS while the T3 service keeps using Nix Node.
     nix-ld = {
       enable = true;
       libraries = nodeNativeLibraries;
@@ -67,7 +63,6 @@ in
       vimAlias = true;
     };
 
-    # Fish initializes Starship and Zoxide from the user's dotfiles.
     ssh.startAgent = true;
     yazi.enable = true;
   };
@@ -75,7 +70,6 @@ in
   environment.sessionVariables.PKG_CONFIG_PATH =
     lib.makeSearchPathOutput "dev" "lib/pkgconfig" nodeNativeLibraries;
 
-  # Match the socket path exported by the Fish dotfiles.
   systemd.user.services.ssh-agent.serviceConfig = {
     ExecStartPre = lib.mkForce "${pkgs.coreutils}/bin/rm -f %t/ssh-agent.socket";
     ExecStart = lib.mkForce "${pkgs.openssh}/bin/ssh-agent -a %t/ssh-agent.socket";
@@ -101,8 +95,6 @@ in
     autoPrune = {
       enable = true;
       dates = "Sun 05:30";
-      # Remove only objects unused for at least seven days. Volumes are never
-      # pruned automatically because they can contain development data.
       flags = [
         "--all"
         "--filter=until=168h"
@@ -133,6 +125,7 @@ in
     docker-compose
     ethtool
     eza
+    fastfetch
     fd
     file
     fnm
@@ -179,6 +172,7 @@ in
     tcpdump
     tmux
     tokei
+    trash-cli
     tree
     tree-sitter
     unzip
