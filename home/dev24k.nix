@@ -1,4 +1,23 @@
-{ inputs, pkgs, ... }:
+{ inputs, lib, pkgs, ... }:
+
+let
+  nodeNativeLibraries = with pkgs; [
+    cairo
+    fontconfig
+    freetype
+    gdk-pixbuf
+    giflib
+    glib
+    harfbuzz
+    libjpeg
+    libpng
+    librsvg
+    pango
+    pixman
+  ];
+  nodeNativePkgConfigPath =
+    lib.makeSearchPathOutput "dev" "lib/pkgconfig" nodeNativeLibraries;
+in
 
 {
   home = {
@@ -28,6 +47,7 @@
         Environment="PATH=${pkgs.nodejs_24}/bin:/run/wrappers/bin:/etc/profiles/per-user/dev24k/bin:/run/current-system/sw/bin"
         Environment="NIX_LD=/run/current-system/sw/share/nix-ld/lib/ld.so"
         Environment="NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib"
+        Environment="PKG_CONFIG_PATH=${nodeNativePkgConfigPath}"
       '';
     };
   };

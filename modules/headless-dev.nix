@@ -1,5 +1,24 @@
 { lib, pkgs, ... }:
 
+let
+  # Native libraries used when Node packages such as canvas cannot download a
+  # prebuilt binary and fall back to node-gyp compilation.
+  nodeNativeLibraries = with pkgs; [
+    cairo
+    fontconfig
+    freetype
+    gdk-pixbuf
+    giflib
+    glib
+    harfbuzz
+    libjpeg
+    libpng
+    librsvg
+    pango
+    pixman
+  ];
+in
+
 {
   nix.settings = {
     experimental-features = [
@@ -20,7 +39,10 @@
 
     # fnm downloads ordinary dynamically linked Linux Node binaries. Let
     # those binaries run on NixOS while the T3 service keeps using Nix Node.
-    nix-ld.enable = true;
+    nix-ld = {
+      enable = true;
+      libraries = nodeNativeLibraries;
+    };
 
     fish = {
       enable = true;
@@ -49,6 +71,9 @@
     ssh.startAgent = true;
     yazi.enable = true;
   };
+
+  environment.sessionVariables.PKG_CONFIG_PATH =
+    lib.makeSearchPathOutput "dev" "lib/pkgconfig" nodeNativeLibraries;
 
   # Match the socket path exported by the Fish dotfiles.
   systemd.user.services.ssh-agent.serviceConfig = {
