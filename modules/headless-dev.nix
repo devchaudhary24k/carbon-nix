@@ -18,6 +18,10 @@
   programs = {
     direnv.enable = true;
 
+    # fnm downloads ordinary dynamically linked Linux Node binaries. Let
+    # those binaries run on NixOS while the T3 service keeps using Nix Node.
+    nix-ld.enable = true;
+
     fish = {
       enable = true;
       interactiveShellInit = ''
