@@ -3,6 +3,7 @@
 let
   prismaEngines =
     inputs.nixpkgs-prisma5.legacyPackages.${pkgs.stdenv.hostPlatform.system}.prisma-engines;
+  vitePlus = pkgs.callPackage ../packages/vite-plus.nix { };
   nodeNativeLibraries = with pkgs; [
     cairo
     fontconfig
@@ -195,6 +196,7 @@ in
     unzip
     usbutils
     uv
+    vitePlus
     watchexec
     websocat
     wget
