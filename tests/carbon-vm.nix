@@ -75,7 +75,9 @@ pkgs.testers.runNixOSTest {
     machine.succeed("systemctl is-enabled docker-prune.timer | grep -x enabled")
     machine.succeed("systemctl is-enabled carbon-health.timer | grep -x enabled")
     machine.succeed("command -v carbon-health-check")
+    machine.succeed("command -v bun")
     machine.succeed("vp --version | grep -F 'vp v0.2.9'")
+    machine.succeed("command -v yarn")
     machine.succeed("install -d -m 0700 /tmp/carbon-health-credentials /var/lib/carbon-monitor")
     machine.succeed(
         "printf '%s\\n' 'https://uptime.betterstack.com/api/v1/heartbeat/test-token' "

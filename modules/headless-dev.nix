@@ -133,6 +133,7 @@ in
     bind
     btop
     btrfs-progs
+    bun
     clang
     chromium
     cmake
@@ -201,6 +202,7 @@ in
     websocat
     wget
     xh
+    yarn-berry
     zip
     zoxide
   ];
