@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# Store the Better Stack heartbeat URL that modules/health-monitor.nix reads.
+#
+# The URL is a secret, so it is not in this repo. It is written to
+# /etc/health-monitor/heartbeat-url, root-only, and the health service stays
+# skipped until that file exists.
 
 set -euo pipefail
 
@@ -26,18 +32,18 @@ case "$heartbeat_token" in
     ;;
 esac
 
-install -d -m 0700 -o root -g root /etc/carbon-monitor
+install -d -m 0700 -o root -g root /etc/health-monitor
 umask 0077
-printf '%s\n' "$heartbeat_url" > /etc/carbon-monitor/heartbeat-url
-chown root:root /etc/carbon-monitor/heartbeat-url
-chmod 0600 /etc/carbon-monitor/heartbeat-url
+printf '%s\n' "$heartbeat_url" > /etc/health-monitor/heartbeat-url
+chown root:root /etc/health-monitor/heartbeat-url
+chmod 0600 /etc/health-monitor/heartbeat-url
 unset heartbeat_url
 unset heartbeat_token
 
-systemctl start carbon-health.service
+systemctl start health-monitor.service
 echo
 echo "Health check result:"
-cat /var/lib/carbon-monitor/last-report
+cat /var/lib/health-monitor/last-report
 echo
 echo "The checker is a one-shot service, so inactive between runs is normal."
-systemctl status carbon-health.timer --no-pager
+systemctl status health-monitor.timer --no-pager

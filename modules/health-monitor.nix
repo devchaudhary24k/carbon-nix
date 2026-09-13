@@ -1,8 +1,19 @@
+# Aggregate health check reported to a Better Stack heartbeat every five
+# minutes. A failing check posts the report body; a missed ping catches the
+# whole machine being unreachable.
+#
+# The heartbeat URL is a secret, so it is not in this repo. installer/
+# setup-monitoring.sh writes it to /etc/health-monitor/heartbeat-url, and the
+# service below is skipped until that file exists.
 { config, pkgs, ... }:
 
 let
-  carbonHealthCheck = pkgs.writeShellApplication {
-    name = "carbon-health-check";
+  hostName = config.networking.hostName;
+  inherit (config.machine) btrfsRootPath bulkPath;
+  backupRoot = "${bulkPath}/backups/databases";
+
+  healthCheck = pkgs.writeShellApplication {
+    name = "health-check";
     runtimeInputs = with pkgs; [
       config.services.mysql.package
       config.services.postgresql.package
@@ -19,7 +30,7 @@ let
       util-linux
     ];
     text = ''
-      state_dir=/var/lib/carbon-monitor
+      state_dir=/var/lib/health-monitor
       credential_file="$CREDENTIALS_DIRECTORY/heartbeat-url"
       report_file="$state_dir/last-report"
       first_run_file="$state_dir/first-run"
@@ -77,7 +88,7 @@ let
       )
 
       critical_timers=(
-        btrbk-carbon.timer
+        btrbk-${hostName}.timer
         docker-prune.timer
         mariadb-backup.timer
         nixos-upgrade.timer
@@ -100,14 +111,14 @@ let
         add_issue "TIMER: expected two enabled Btrfs scrub timers, found $scrub_timer_count"
       fi
 
-      for mount_path in /mnt/btrfs-root /srv/bulk; do
+      for mount_path in ${btrfsRootPath} ${bulkPath}; do
         if ! mountpoint --quiet "$mount_path"; then
           add_issue "MOUNT: $mount_path is not mounted"
         fi
       done
 
       disk_summary=()
-      for mount_path in / /srv/bulk; do
+      for mount_path in / ${bulkPath}; do
         if [[ "$mount_path" == / ]] || mountpoint --quiet "$mount_path"; then
           used_percent=$(df --output=pcent "$mount_path" | tail -n 1 | tr -dc '0-9')
           disk_summary+=("$mount_path=''${used_percent}%")
@@ -198,7 +209,7 @@ let
       # Give a fresh installation time to produce its first scheduled data.
       if find "$first_run_file" -mmin +2880 -print -quit | grep --quiet .; then
         for snapshot_name in root home; do
-          if ! find /srv/bulk/snapshots/carbon -maxdepth 2 -type d \
+          if ! find ${bulkPath}/snapshots/${hostName} -maxdepth 2 -type d \
             -name "$snapshot_name.*" -cmin -2880 -print -quit 2>/dev/null |
             grep --quiet .; then
             add_issue "SNAPSHOT: no recent $snapshot_name snapshot on the HDD"
@@ -208,9 +219,9 @@ let
 
       if find "$first_run_file" -mmin +12960 -print -quit | grep --quiet .; then
         backup_checks=(
-          "/srv/bulk/backups/databases/postgresql|all-*.sql.zst|PostgreSQL"
-          "/srv/bulk/backups/databases/mariadb|all-*.sql.zst|MariaDB"
-          "/srv/bulk/backups/databases/valkey|valkey-*.rdb|Valkey"
+          "${backupRoot}/postgresql|all-*.sql.zst|PostgreSQL"
+          "${backupRoot}/mariadb|all-*.sql.zst|MariaDB"
+          "${backupRoot}/valkey|valkey-*.rdb|Valkey"
         )
         for check in "''${backup_checks[@]}"; do
           IFS='|' read -r directory pattern label <<< "$check"
@@ -243,7 +254,7 @@ let
 
       if (( ''${#issues[@]} > 0 )); then
         {
-          printf 'carbon health check failed at %s\n' "$(date --iso-8601=seconds)"
+          printf '${hostName} health check failed at %s\n' "$(date --iso-8601=seconds)"
           printf -- '- %s\n' "''${issues[@]}"
           printf 'Current: CPU=%s%% memory=%s%% load15=%s disks=%s\n' \
             "$cpu_percent" "$memory_percent" "$load_15" "''${disk_summary[*]}"
@@ -251,7 +262,7 @@ let
         endpoint="$heartbeat_url/1"
         curl_body=(--data-binary "@$report_file")
       else
-        printf 'carbon healthy: CPU=%s%% memory=%s%% load15=%s disks=%s at %s\n' \
+        printf '${hostName} healthy: CPU=%s%% memory=%s%% load15=%s disks=%s at %s\n' \
           "$cpu_percent" "$memory_percent" "$load_15" \
           "''${disk_summary[*]}" "$(date --iso-8601=seconds)" > "$report_file"
         endpoint="$heartbeat_url"
@@ -260,9 +271,9 @@ let
 
       cat "$report_file"
 
-      # Exercise every local check in the VM test without contacting an
+      # Lets the VM test exercise every local check without contacting an
       # external heartbeat endpoint.
-      if [[ ''${CARBON_HEALTH_DRY_RUN:-0} == 1 ]]; then
+      if [[ ''${HEALTH_CHECK_DRY_RUN:-0} == 1 ]]; then
         exit 0
       fi
 
@@ -277,14 +288,14 @@ let
 in
 
 {
-  environment.systemPackages = [ carbonHealthCheck ];
+  environment.systemPackages = [ healthCheck ];
 
   systemd.tmpfiles.rules = [
-    "d /etc/carbon-monitor 0700 root root - -"
+    "d /etc/health-monitor 0700 root root - -"
   ];
 
-  systemd.services.carbon-health = {
-    description = "Check carbon health and report to Better Stack";
+  systemd.services.health-monitor = {
+    description = "Check ${hostName} health and report to Better Stack";
     after = [
       "network-online.target"
       "postgresql.service"
@@ -292,12 +303,12 @@ in
       "redis.service"
     ];
     wants = [ "network-online.target" ];
-    unitConfig.ConditionPathExists = "/etc/carbon-monitor/heartbeat-url";
+    unitConfig.ConditionPathExists = "/etc/health-monitor/heartbeat-url";
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${carbonHealthCheck}/bin/carbon-health-check";
-      LoadCredential = "heartbeat-url:/etc/carbon-monitor/heartbeat-url";
-      StateDirectory = "carbon-monitor";
+      ExecStart = "${healthCheck}/bin/health-check";
+      LoadCredential = "heartbeat-url:/etc/health-monitor/heartbeat-url";
+      StateDirectory = "health-monitor";
       StateDirectoryMode = "0700";
       UMask = "0077";
       PrivateTmp = true;
@@ -306,8 +317,8 @@ in
     };
   };
 
-  systemd.timers.carbon-health = {
-    description = "Run carbon health checks every five minutes";
+  systemd.timers.health-monitor = {
+    description = "Run ${hostName} health checks every five minutes";
     wantedBy = [ "timers.target" ];
     timerConfig = {
       OnBootSec = "10m";

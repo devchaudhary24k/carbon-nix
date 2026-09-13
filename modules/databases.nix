@@ -1,7 +1,10 @@
-{ pkgs, ... }:
+# PostgreSQL, MariaDB and Valkey, each bound to localhost, each dumped weekly
+# to the bulk disk with the five newest dumps kept.
+{ config, pkgs, ... }:
 
 let
   postgresqlPackage = pkgs.postgresql_18;
+  backupRoot = "${config.machine.bulkPath}/backups/databases";
 
   # Backup filenames never contain spaces. Sort newest first and delete every
   # file after the fifth successful backup.
@@ -51,7 +54,7 @@ in
         "postgresql.service"
       ];
       requires = [ "postgresql.service" ];
-      unitConfig.RequiresMountsFor = [ "/srv/bulk" ];
+      unitConfig.RequiresMountsFor = [ config.machine.bulkPath ];
       serviceConfig = {
         Type = "oneshot";
         User = "postgres";
@@ -59,7 +62,7 @@ in
       };
       script = ''
         set -euo pipefail
-        backup_dir=/srv/bulk/backups/databases/postgresql
+        backup_dir=${backupRoot}/postgresql
         ${pkgs.coreutils}/bin/install -d -m 0700 "$backup_dir"
         stamp=$(${pkgs.coreutils}/bin/date +%Y-%m-%d_%H-%M-%S)
         output="$backup_dir/all-$stamp.sql.zst"
@@ -80,14 +83,14 @@ in
         "mysql.service"
       ];
       requires = [ "mysql.service" ];
-      unitConfig.RequiresMountsFor = [ "/srv/bulk" ];
+      unitConfig.RequiresMountsFor = [ config.machine.bulkPath ];
       serviceConfig = {
         Type = "oneshot";
         UMask = "0077";
       };
       script = ''
         set -euo pipefail
-        backup_dir=/srv/bulk/backups/databases/mariadb
+        backup_dir=${backupRoot}/mariadb
         ${pkgs.coreutils}/bin/install -d -m 0700 "$backup_dir"
         stamp=$(${pkgs.coreutils}/bin/date +%Y-%m-%d_%H-%M-%S)
         output="$backup_dir/all-$stamp.sql.zst"
@@ -109,14 +112,14 @@ in
         "redis.service"
       ];
       requires = [ "redis.service" ];
-      unitConfig.RequiresMountsFor = [ "/srv/bulk" ];
+      unitConfig.RequiresMountsFor = [ config.machine.bulkPath ];
       serviceConfig = {
         Type = "oneshot";
         UMask = "0077";
       };
       script = ''
         set -euo pipefail
-        backup_dir=/srv/bulk/backups/databases/valkey
+        backup_dir=${backupRoot}/valkey
         ${pkgs.coreutils}/bin/install -d -m 0700 "$backup_dir"
         stamp=$(${pkgs.coreutils}/bin/date +%Y-%m-%d_%H-%M-%S)
         ${pkgs.valkey}/bin/valkey-cli --rdb "$backup_dir/valkey-$stamp.rdb"

@@ -1,3 +1,5 @@
+# Logging, crash capture and hardware telemetry. The matching command line
+# tools (atop, sar, smartctl, ras-mc-ctl) are in modules/packages.nix.
 { pkgs, ... }:
 
 {
@@ -73,11 +75,4 @@
       dmidecode --type system --type baseboard --type bios
     '';
   };
-
-  environment.systemPackages = with pkgs; [
-    atop
-    rasdaemon
-    smartmontools
-    sysstat
-  ];
 }
