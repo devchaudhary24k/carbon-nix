@@ -23,6 +23,8 @@ let
   defaultPorts = lib.listToAttrs (
     lib.imap0 (index: name: lib.nameValuePair name (cfg.mcp.basePort + index)) names
   );
+  delayOf = name: cfg.startDelay * (lib.lists.findFirstIndex (n: n == name) 0 names);
+
   portOf =
     name:
     let
@@ -60,7 +62,14 @@ let
 
         # A clearer failure than MCC generating a default config and silently
         # trying to log in as nobody.
-        ExecStartPre = "${pkgs.coreutils}/bin/test -f ${configOf name}";
+        ExecStartPre = [
+          "${pkgs.coreutils}/bin/test -f ${configOf name}"
+        ]
+        ++ lib.optional (delayOf name > 0) "${pkgs.coreutils}/bin/sleep ${toString (delayOf name)}";
+
+        # ExecStartPre counts against the start timeout, so the stagger has to
+        # fit inside it.
+        TimeoutStartSec = delayOf name + 120;
 
         ExecStart = lib.concatStringsSep " " [
           (lib.getExe cfg.package)
@@ -178,7 +187,12 @@ let
         mcp     <account> <method> [params-json]
                                      Raw JSON-RPC call to that bot's MCP server
 
-      Bots start at boot on their own. MCP only answers while a bot is in game.
+      Bots connect at boot on their own, staggered so the server does not reject
+      them. They do not need tmux or an open SSH session.
+
+      MCP only answers while a bot is in game, and it does not come back by
+      itself after MCC's AutoRelog reconnects. If LISTENING says no for a bot
+      that is otherwise fine, "mcc restart <account>" brings it back.
       EOF
       }
 
@@ -194,8 +208,14 @@ let
           [[ $# -ge 1 ]] || { echo "usage: mcc $command <account|all>" >&2; exit 2; }
           mapfile -t targets < <(resolve "$1")
           for account in "''${targets[@]}"; do
-            echo "''${command}ing $account"
+            before=$(systemctl is-active "mcc-$account.service" 2>/dev/null || true)
+            if [[ "$command" == start && "$before" == active ]]; then
+              printf '%-20s already running\n' "$account"
+              continue
+            fi
             systemctl "$command" "mcc-$account.service"
+            printf '%-20s %s\n' "$account" \
+              "$(systemctl is-active "mcc-$account.service" 2>/dev/null || echo failed)"
           done
           ;;
 
@@ -283,6 +303,19 @@ in
         default = 33331;
         description = "First MCP port. Accounts get consecutive ports from here.";
       };
+    };
+
+    startDelay = lib.mkOption {
+      type = lib.types.int;
+      default = 20;
+      description = ''
+        Seconds to wait between one account connecting and the next. Four bots
+        logging in at once made the server reject some of them with "Failed to
+        login to this server", after which MCC's AutoRelog reconnected but its
+        MCP server did not come back. Staggering avoids the rejection.
+
+        Set to 0 to start every account at once.
+      '';
     };
 
     accounts = lib.mkOption {
