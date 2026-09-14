@@ -9,29 +9,6 @@
   ...
 }:
 
-let
-  # Minecraft Console Client ships a self-contained .NET binary that looks for
-  # ICU and OpenSSL in an FHS that does not exist here. nix-ld gets it running;
-  # these are the libraries it asks for.
-  mccLibraries = with pkgs; [
-    curl
-    icu
-    krb5
-    libunwind
-    openssl
-    stdenv.cc.cc
-    zlib
-    zstd
-  ];
-
-  # Handing .NET the exact store paths is more reliable than letting it search
-  # the generic nix-ld path for ICU.
-  mccRuntime = pkgs.writeShellScriptBin "mcc-runtime" ''
-    export LD_LIBRARY_PATH="${lib.makeLibraryPath mccLibraries}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    exec /opt/mcc/bin/MinecraftClient "$@"
-  '';
-in
-
 {
   imports = [
     ./disks.nix
@@ -43,6 +20,7 @@ in
     ../../modules/databases.nix
     ../../modules/dev-runtime.nix
     ../../modules/health-monitor.nix
+    ../../modules/mcc.nix
     ../../modules/snapshots.nix
   ];
 
@@ -83,14 +61,18 @@ in
       "claude-code"
     ];
 
-  # Packages only this machine needs. The shared toolbox is modules/packages.nix.
-  environment.systemPackages = [
-    pkgs.dotnet-sdk_10
-    mccRuntime
-  ];
-
-  # Appended to the libraries modules/dev-runtime.nix already provides.
-  programs.nix-ld.libraries = mccLibraries;
+  # Minecraft bots. The account directories under /opt/mcc hold logins and
+  # cached session tokens, so they are deliberately not managed by Nix.
+  services.minecraft-mcc = {
+    enable = true;
+    user = "dev24k";
+    accounts = {
+      dev24k = { };
+      devchaudhary24k = { };
+      hammersamster = { };
+      kartik = { };
+    };
+  };
 
   users.users.dev24k = {
     isNormalUser = true;

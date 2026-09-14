@@ -59,6 +59,11 @@ pkgs.testers.runNixOSTest {
       # a stale clock would otherwise start a real upgrade.
       systemd.timers.nixos-upgrade.wantedBy = lib.mkForce [ ];
 
+      # The bots need real account directories and a real Minecraft server.
+      # Define the units so their configuration can be checked, but never let
+      # them start.
+      systemd.targets.mcc.wantedBy = lib.mkForce [ ];
+
       # Btrfs operations need real disks.
       services.btrbk.instances = lib.mkForce { };
       services.btrfs.autoScrub.enable = lib.mkForce false;
@@ -150,6 +155,22 @@ pkgs.testers.runNixOSTest {
           # Committed but with no reachable remote is still refused, because the
           # upgrade would build the remote's version instead.
           machine.fail("auto-upgrade-guard")
+
+      with subtest("minecraft bots are configured but not running"):
+          # Ports are assigned in account-name order from basePort 33331, so
+          # kartik is the fourth.
+          machine.succeed(
+              "systemctl cat mcc-kartik.service "
+              "| grep -F 'ChatBot.McpServer.Transport.Port=33334'"
+          )
+          machine.succeed(
+              "systemctl cat mcc-kartik.service | grep -F 'ChatBot.McpServer.Enabled=true'"
+          )
+          machine.succeed("systemctl cat mcc-dev24k.service | grep -F 'Port=33331'")
+          machine.fail("systemctl is-active --quiet mcc-kartik.service")
+          machine.succeed("command -v mcc")
+          machine.succeed("mcc list | grep -x kartik")
+          machine.succeed("mcc ports | grep -x 'hammersamster 33333'")
 
       with subtest("health check runs every branch without a heartbeat"):
           machine.succeed("systemctl is-enabled health-monitor.timer | grep -x enabled")
