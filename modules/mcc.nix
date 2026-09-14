@@ -5,8 +5,16 @@
 # backoff, start-rate limiting, status, and logging. tmux is no longer involved,
 # so the bots survive a reboot and a closed SSH session.
 #
-# Each account also gets MCC's embedded MCP server on its own port, which is a
-# real control channel in place of sending keystrokes to a pane.
+# Each bot still runs on a real pty, because MCC's console reads keys directly
+# and ignores a plain pipe. dtach supplies that pty and makes it detachable, so
+# "mcc attach" gives a fully interactive console and "mcc dash" lays all of them
+# out side by side, while systemd keeps owning the process.
+#
+# Console output therefore goes to the pty rather than journald, so MCC's own
+# file logging is turned on and "mcc logs" reads that.
+#
+# Each account also gets MCC's embedded MCP server on its own port, for
+# scripted control that does not need a terminal.
 {
   config,
   lib,
@@ -34,6 +42,9 @@ let
 
   accountDir = name: "${cfg.stateDir}/accounts/${name}";
   configOf = name: "${accountDir name}/MinecraftClient.ini";
+  socketOf = name: "${socketDir}/${name}.sock";
+  logOf = name: "${accountDir name}/console-log.txt";
+  socketDir = "/run/mcc";
 
   mkService =
     name: account:
@@ -71,9 +82,18 @@ let
         # fit inside it.
         TimeoutStartSec = delayOf name + 120;
 
+        # dtach -N runs in the foreground rather than daemonising, so systemd
+        # still supervises the real process, and the pty survives detaching.
         ExecStart = lib.concatStringsSep " " [
+          "${lib.getExe pkgs.dtach}"
+          "-N"
+          (socketOf name)
+          "-r"
+          "winch"
           (lib.getExe cfg.package)
           (configOf name)
+          "--Logging.LogToFile=true"
+          "--Logging.LogFile=${logOf name}"
           "--ChatBot.McpServer.Enabled=${lib.boolToString cfg.mcp.enable}"
           "--ChatBot.McpServer.Transport.BindHost=${cfg.mcp.bindHost}"
           "--ChatBot.McpServer.Transport.Port=${toString (portOf name)}"
@@ -97,7 +117,10 @@ let
         ProtectHome = true;
         ProtectSystem = "strict";
         # MCC writes SessionCache.db and ProfileKeyCache.ini beside its config.
-        ReadWritePaths = [ cfg.stateDir ];
+        ReadWritePaths = [
+          cfg.stateDir
+          socketDir
+        ];
       };
     };
 
@@ -110,10 +133,13 @@ let
     runtimeInputs = with pkgs; [
       coreutils
       curl
+      dtach
       gawk
       gnugrep
       jq
       systemd
+      tmux
+      util-linux
     ];
     text = ''
       accounts() { printf '%s\n' ${lib.escapeShellArg portTable} | awk '{ print $1 }'; }
@@ -138,15 +164,56 @@ let
         fi
       }
 
-      mcp_call() {
-        local account="$1" method="$2" params="''${3:-{\}}" port
+      # MCC speaks the streamable HTTP transport, which refuses any call that is
+      # not preceded by initialize and does not carry the session id returned in
+      # a header. Responses come back as server-sent events.
+      mcp_rpc() {
+        local account="$1" method="$2" params="''${3:-{\}}" port url headers session
         port=$(port_of "$account")
-        curl --silent --show-error --fail-with-body --max-time 10 \
+        url="http://${cfg.mcp.bindHost}:$port/mcp"
+        headers=$(mktemp)
+        trap 'rm -f "$headers"' RETURN
+
+        if ! curl --silent --show-error --fail --max-time 10 --dump-header "$headers" \
+               --header 'Content-Type: application/json' \
+               --header 'Accept: application/json, text/event-stream' \
+               --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcc","version":"1"}}}' \
+               "$url" >/dev/null; then
+          {
+            echo "No MCP server answering on $url."
+            echo "MCC only runs it while the bot is in game, and it does not come"
+            echo "back after an AutoRelog. Try: mcc restart $account"
+          } >&2
+          return 1
+        fi
+
+        session=$(grep -i '^mcp-session-id:' "$headers" | tr -d '\r' | awk '{ print $2 }')
+
+        curl --silent --max-time 10 \
           --header 'Content-Type: application/json' \
           --header 'Accept: application/json, text/event-stream' \
+          --header "Mcp-Session-Id: $session" \
+          --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' "$url" >/dev/null
+
+        curl --silent --show-error --fail-with-body --max-time 20 \
+          --header 'Content-Type: application/json' \
+          --header 'Accept: application/json, text/event-stream' \
+          --header "Mcp-Session-Id: $session" \
           --data "$(jq --null-input --arg m "$method" --argjson p "$params" \
-                      '{jsonrpc: "2.0", id: 1, method: $m, params: $p}')" \
-          "http://${cfg.mcp.bindHost}:$port${"\${MCC_MCP_ROUTE:-/mcp}"}"
+                      '{jsonrpc: "2.0", id: 2, method: $m, params: $p}')" \
+          "$url" | sed -n 's/^data: //p'
+      }
+
+      # tools/call, unwrapped to the text the tool returned.
+      mcp_tool() {
+        local account="$1" tool="$2" args="''${3:-{\}}"
+        mcp_rpc "$account" tools/call \
+          "$(jq --null-input --arg n "$tool" --argjson a "$args" \
+               '{name: $n, arguments: $a}')" \
+          | jq --raw-output '
+              if .error then "error: " + (.error.message // (.error | tostring))
+              elif .result.content then (.result.content[]? | .text // tostring)
+              else ((.result // .) | tostring) end'
       }
 
       status_table() {
@@ -182,13 +249,23 @@ let
         start   <account|all>        Connect
         stop    <account|all>        Disconnect
         restart <account|all>        Reconnect
-        logs    <account> [-f]       Follow the journal for one account
-        tools   <account>            MCP tools that bot exposes while in game
+        logs    <account> [-f|N]     Recent console output, or follow it
+        attach  <account>            Interactive console for one bot
+        dash                         All bots side by side, one pane each
+        say     <account> <text>     Send chat or a slash command
+        chat    <account> [lines]    Recent chat that bot has seen
+        who     <account>            Players online
+        info    <account>            Session and connection status
+        leave   <account>            Disconnect from the server, keep running
+        tools   <account>            MCP tool names that bot exposes
         mcp     <account> <method> [params-json]
-                                     Raw JSON-RPC call to that bot's MCP server
+                                     Raw JSON-RPC to that bot's MCP server
 
       Bots connect at boot on their own, staggered so the server does not reject
-      them. They do not need tmux or an open SSH session.
+      them. They keep running when you detach or close SSH.
+
+      In attach, Ctrl-\\ detaches. In dash, Ctrl-B then D detaches, and Ctrl-B
+      then an arrow key moves between bots. Neither stops the bot.
 
       MCP only answers while a bot is in game, and it does not come back by
       itself after MCC's AutoRelog reconnects. If LISTENING says no for a bot
@@ -223,19 +300,104 @@ let
           [[ $# -ge 1 ]] || { echo "usage: mcc logs <account> [-f]" >&2; exit 2; }
           account="$1"; shift
           known "$account" || { echo "Unknown account: $account" >&2; exit 1; }
-          journalctl --unit "mcc-$account.service" --no-hostname "$@"
+          log=${lib.escapeShellArg cfg.stateDir}/accounts/"$account"/console-log.txt
+          if [[ ! -f "$log" ]]; then
+            echo "No log yet at $log. Has $account started?" >&2
+            exit 1
+          fi
+          if [[ "''${1:-}" == -f ]]; then
+            tail --follow=name --lines=50 "$log"
+          else
+            tail --lines="''${1:-200}" "$log"
+          fi
+          ;;
+
+        attach)
+          [[ $# -ge 1 ]] || { echo "usage: mcc attach <account>" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          socket=${lib.escapeShellArg socketDir}/"$1".sock
+          if [[ ! -S "$socket" ]]; then
+            echo "$1 is not running, so there is no console to attach to." >&2
+            exit 1
+          fi
+          echo "Attaching to $1. Detach with Ctrl-\\ (this leaves the bot running)."
+          exec dtach -a "$socket" -r winch
+          ;;
+
+        dash)
+          # One pane per account, each a live console. Ctrl-B then arrows to
+          # move between them, Ctrl-B then D to leave the whole thing running.
+          session=mcc
+          if tmux has-session -t "$session" 2>/dev/null; then
+            exec tmux attach-session -t "$session"
+          fi
+          first=1
+          while read -r account; do
+            socket=${lib.escapeShellArg socketDir}/"$account".sock
+            if [[ -S "$socket" ]]; then
+              pane_command="dtach -a $socket -r winch"
+            else
+              pane_command="echo '$account is not running. Start it with: mcc start $account'; exec sleep infinity"
+            fi
+            if ((first)); then
+              tmux new-session -d -s "$session" -n bots "$pane_command"
+              first=0
+            else
+              tmux split-window -t "$session:bots" "$pane_command"
+              tmux select-layout -t "$session:bots" tiled >/dev/null
+            fi
+            tmux select-pane -t "$session:bots.{last}" -T "$account"
+          done < <(accounts)
+          tmux select-layout -t "$session:bots" tiled >/dev/null
+          tmux set-window-option -t "$session:bots" pane-border-status top >/dev/null
+          tmux set-window-option -t "$session:bots" pane-border-format ' #{pane_title} ' >/dev/null
+          exec tmux attach-session -t "$session"
+          ;;
+
+        say)
+          [[ $# -ge 2 ]] || { echo "usage: mcc say <account> <message or /command>" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          account="$1"; shift
+          mcp_tool "$account" mcc_send_chat "$(jq --null-input --arg t "$*" '{text: $t}')"
+          ;;
+
+        chat)
+          [[ $# -ge 1 ]] || { echo "usage: mcc chat <account> [lines]" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          mcp_tool "$1" mcc_chat_history \
+            "$(jq --null-input --argjson n "''${2:-40}" '{maxCount: $n}')"
+          ;;
+
+        who)
+          [[ $# -ge 1 ]] || { echo "usage: mcc who <account>" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          mcp_tool "$1" mcc_players_list
+          ;;
+
+        info)
+          [[ $# -ge 1 ]] || { echo "usage: mcc info <account>" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          mcp_tool "$1" mcc_session_status
+          ;;
+
+        leave)
+          # Leaves the server without stopping the service, so MCC's own
+          # reconnect logic can bring it back.
+          [[ $# -ge 1 ]] || { echo "usage: mcc leave <account>" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          mcp_tool "$1" mcc_disconnect
           ;;
 
         tools)
           [[ $# -ge 1 ]] || { echo "usage: mcc tools <account>" >&2; exit 2; }
           known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
-          mcp_call "$1" tools/list
+          mcp_rpc "$1" tools/list | jq --raw-output '.result.tools[]? | .name'
           ;;
 
         mcp)
           [[ $# -ge 2 ]] || { echo "usage: mcc mcp <account> <method> [params-json]" >&2; exit 2; }
           known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
-          mcp_call "$1" "$2" "''${3:-{\}}"
+          mcp_rpc "$1" "$2" "''${3:-{\}}"
           ;;
 
         -h | --help | help) usage ;;
@@ -355,6 +517,11 @@ in
 
     # The interpreter the unpatched bundle asks for.
     programs.nix-ld.libraries = cfg.package.runtimeLibraries;
+
+    # dtach sockets. ProtectSystem=strict would otherwise leave /run read-only.
+    systemd.tmpfiles.rules = [
+      "d ${socketDir} 0700 ${cfg.user} ${cfg.group} -"
+    ];
 
     systemd.targets.mcc = {
       description = "All Minecraft Console Client bots";
