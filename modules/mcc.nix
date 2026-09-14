@@ -5,16 +5,19 @@
 # backoff, start-rate limiting, status, and logging. tmux is no longer involved,
 # so the bots survive a reboot and a closed SSH session.
 #
-# Each bot still runs on a real pty, because MCC's console reads keys directly
-# and ignores a plain pipe. dtach supplies that pty and makes it detachable, so
-# "mcc attach" gives a fully interactive console and "mcc dash" lays all of them
-# out side by side, while systemd keeps owning the process.
+# Bots write to the journal and are driven through MCC's embedded MCP server.
 #
-# Console output therefore goes to the pty rather than journald, so MCC's own
-# file logging is turned on and "mcc logs" reads that.
+# An earlier version ran each bot on a detachable pty so "mcc attach" could type
+# straight into MCC's own console. That was a mistake. dtach creates its pty at
+# 0x0 until someone attaches, and MCC's console lays itself out from the
+# terminal width, so attaching to a running bot made it emit a corrupted redraw
+# and then read that back as commands. It disconnected a live bot and ran
+# garbage in chat.
 #
-# Each account also gets MCC's embedded MCP server on its own port, for
-# scripted control that does not need a terminal.
+# MCP does the same job without touching a terminal: mcc_send_chat for input,
+# the journal for output. "mcc console" combines the two into one pane and
+# "mcc dash" tiles one per account, which is the multi-pane view without the
+# corruption.
 {
   config,
   lib,
@@ -42,9 +45,6 @@ let
 
   accountDir = name: "${cfg.stateDir}/accounts/${name}";
   configOf = name: "${accountDir name}/MinecraftClient.ini";
-  socketOf = name: "${socketDir}/${name}.sock";
-  logOf = name: "${accountDir name}/console-log.txt";
-  socketDir = "/run/mcc";
 
   mkService =
     name: account:
@@ -82,18 +82,9 @@ let
         # fit inside it.
         TimeoutStartSec = delayOf name + 120;
 
-        # dtach -N runs in the foreground rather than daemonising, so systemd
-        # still supervises the real process, and the pty survives detaching.
         ExecStart = lib.concatStringsSep " " [
-          "${lib.getExe pkgs.dtach}"
-          "-N"
-          (socketOf name)
-          "-r"
-          "winch"
           (lib.getExe cfg.package)
           (configOf name)
-          "--Logging.LogToFile=true"
-          "--Logging.LogFile=${logOf name}"
           "--ChatBot.McpServer.Enabled=${lib.boolToString cfg.mcp.enable}"
           "--ChatBot.McpServer.Transport.BindHost=${cfg.mcp.bindHost}"
           "--ChatBot.McpServer.Transport.Port=${toString (portOf name)}"
@@ -117,10 +108,7 @@ let
         ProtectHome = true;
         ProtectSystem = "strict";
         # MCC writes SessionCache.db and ProfileKeyCache.ini beside its config.
-        ReadWritePaths = [
-          cfg.stateDir
-          socketDir
-        ];
+        ReadWritePaths = [ cfg.stateDir ];
       };
     };
 
@@ -133,7 +121,6 @@ let
     runtimeInputs = with pkgs; [
       coreutils
       curl
-      dtach
       gawk
       gnugrep
       jq
@@ -249,10 +236,11 @@ let
         start   <account|all>        Connect
         stop    <account|all>        Disconnect
         restart <account|all>        Reconnect
-        logs    <account> [-f|N]     Recent console output, or follow it
-        attach  <account>            Interactive console for one bot
-        dash                         All bots side by side, one pane each
-        say     <account> <text>     Send chat or a slash command
+        logs    <account> [-f]       Recent output, or follow it
+        console <account>            Live output plus a prompt to chat
+        dash                         Every bot tiled, one console each
+        say     <account> <text>     Send chat or a server command
+        cmd     <account> <command>  Run an MCC internal command
         chat    <account> [lines]    Recent chat that bot has seen
         who     <account>            Players online
         info    <account>            Session and connection status
@@ -264,8 +252,12 @@ let
       Bots connect at boot on their own, staggered so the server does not reject
       them. They keep running when you detach or close SSH.
 
-      In attach, Ctrl-\\ detaches. In dash, Ctrl-B then D detaches, and Ctrl-B
-      then an arrow key moves between bots. Neither stops the bot.
+      In dash, Ctrl-B then D leaves everything running, and Ctrl-B then an arrow
+      key moves between bots. Ctrl-C leaves a single console. Neither stops a bot.
+
+      Sending needs that bot's MCP server, which MCC only runs while it is in
+      game and does not restart after an AutoRelog. If a console will not send,
+      check mcc status and restart that account.
 
       MCP only answers while a bot is in game, and it does not come back by
       itself after MCC's AutoRelog reconnects. If LISTENING says no for a bot
@@ -300,58 +292,82 @@ let
           [[ $# -ge 1 ]] || { echo "usage: mcc logs <account> [-f]" >&2; exit 2; }
           account="$1"; shift
           known "$account" || { echo "Unknown account: $account" >&2; exit 1; }
-          log=${lib.escapeShellArg cfg.stateDir}/accounts/"$account"/console-log.txt
-          if [[ ! -f "$log" ]]; then
-            echo "No log yet at $log. Has $account started?" >&2
-            exit 1
-          fi
-          if [[ "''${1:-}" == -f ]]; then
-            tail --follow=name --lines=50 "$log"
-          else
-            tail --lines="''${1:-200}" "$log"
-          fi
+          journalctl --unit "mcc-$account.service" --no-hostname --lines 200 "$@"
           ;;
 
-        attach)
-          [[ $# -ge 1 ]] || { echo "usage: mcc attach <account>" >&2; exit 2; }
+        console)
+          # Output from the journal, input through MCP. Nothing here touches
+          # MCC's terminal, so it cannot corrupt a running bot.
+          [[ $# -ge 1 ]] || { echo "usage: mcc console <account>" >&2; exit 2; }
           known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
-          socket=${lib.escapeShellArg socketDir}/"$1".sock
-          if [[ ! -S "$socket" ]]; then
-            echo "$1 is not running, so there is no console to attach to." >&2
-            exit 1
-          fi
-          echo "Attaching to $1. Detach with Ctrl-\\ (this leaves the bot running)."
-          exec dtach -a "$socket" -r winch
+          account="$1"
+          journalctl --unit "mcc-$account.service" --no-hostname --follow --lines 40 &
+          tail_pid=$!
+          # shellcheck disable=SC2064
+          trap "kill $tail_pid 2>/dev/null || true" EXIT INT TERM
+          echo "--- $account: type to chat, /command to run one, Ctrl-C to leave ---" >&2
+          while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            mcp_tool "$account" mcc_send_chat \
+              "$(jq --null-input --arg t "$line" '{text: $t}')" >/dev/null \
+              || echo "(not sent: is $account in game?)" >&2
+          done
+
+          # End of input, from Ctrl-D or from tmux passing one on while
+          # detaching. Keep streaming output rather than closing the pane,
+          # which would lose that bot's view until dash is restarted.
+          echo "--- input closed for $account; still showing output ---" >&2
+          wait "$tail_pid"
           ;;
 
         dash)
-          # One pane per account, each a live console. Ctrl-B then arrows to
-          # move between them, Ctrl-B then D to leave the whole thing running.
+          # One console per account, tiled. Ctrl-B then arrows to move, Ctrl-B
+          # then D to leave it all running.
           session=mcc
           if tmux has-session -t "$session" 2>/dev/null; then
             exec tmux attach-session -t "$session"
           fi
+          # This script's own path, so the panes work regardless of PATH.
+          self=''${BASH_SOURCE[0]}
+          # Read the list into an array first. Looping over a process
+          # substitution leaves tmux sharing the loop's stdin, and it eats an
+          # account, which silently costs you a pane.
+          mapfile -t dash_accounts < <(accounts)
           first=1
-          while read -r account; do
-            socket=${lib.escapeShellArg socketDir}/"$account".sock
-            if [[ -S "$socket" ]]; then
-              pane_command="dtach -a $socket -r winch"
-            else
-              pane_command="echo '$account is not running. Start it with: mcc start $account'; exec sleep infinity"
-            fi
+          for account in "''${dash_accounts[@]}"; do
+            pane_command="$self console $account"
             if ((first)); then
-              tmux new-session -d -s "$session" -n bots "$pane_command"
+              # Give the detached session a large size up front. tmux refuses
+              # to split when there is no room, which silently drops a bot.
+              pane=$(tmux new-session -d -x 200 -y 50 -P -F '#{pane_id}' \
+                       -s "$session" -n bots "$pane_command" </dev/null)
               first=0
             else
-              tmux split-window -t "$session:bots" "$pane_command"
+              if ! pane=$(tmux split-window -t "$session:bots" -P -F '#{pane_id}' \
+                            "$pane_command" </dev/null 2>&1); then
+                echo "Could not add a pane for $account: $pane" >&2
+                continue
+              fi
               tmux select-layout -t "$session:bots" tiled >/dev/null
             fi
-            tmux select-pane -t "$session:bots.{last}" -T "$account"
-          done < <(accounts)
+            tmux select-pane -t "$pane" -T "$account" </dev/null
+          done
           tmux select-layout -t "$session:bots" tiled >/dev/null
+          # A console that dies should leave a visible pane saying so, not
+          # silently shrink the dashboard.
+          tmux set-window-option -t "$session:bots" remain-on-exit on >/dev/null
           tmux set-window-option -t "$session:bots" pane-border-status top >/dev/null
           tmux set-window-option -t "$session:bots" pane-border-format ' #{pane_title} ' >/dev/null
           exec tmux attach-session -t "$session"
+          ;;
+
+        cmd)
+          # MCC's own internal commands, as opposed to server commands.
+          [[ $# -ge 2 ]] || { echo "usage: mcc cmd <account> <internal command>" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          account="$1"; shift
+          mcp_tool "$account" mcc_run_internal_command \
+            "$(jq --null-input --arg c "$*" '{command: $c}')"
           ;;
 
         say)
@@ -517,11 +533,6 @@ in
 
     # The interpreter the unpatched bundle asks for.
     programs.nix-ld.libraries = cfg.package.runtimeLibraries;
-
-    # dtach sockets. ProtectSystem=strict would otherwise leave /run read-only.
-    systemd.tmpfiles.rules = [
-      "d ${socketDir} 0700 ${cfg.user} ${cfg.group} -"
-    ];
 
     systemd.targets.mcc = {
       description = "All Minecraft Console Client bots";
