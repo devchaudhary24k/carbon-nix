@@ -125,6 +125,13 @@ let
         # MCC exits cleanly on SIGTERM, so the default kill signal is enough to
         # let it flush SessionCache.db.
         KillSignal = "SIGTERM";
+
+        # screen returns 1 when its child is terminated, so an ordinary
+        # "mcc stop" left the unit in the failed state and the health monitor
+        # reported it. A bot that really is broken still shows up: Restart
+        # handles the transient case, and a persistent one trips
+        # StartLimitBurst, which marks the unit failed regardless of this.
+        SuccessExitStatus = "1";
         TimeoutStopSec = 30;
 
         Restart = "always";
