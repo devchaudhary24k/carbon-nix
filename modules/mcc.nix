@@ -49,8 +49,17 @@ let
 
   screenrc = pkgs.writeText "mcc-screenrc" ''
     startup_message off
+
     # Attaching should show what the bot has been saying, not a blank pane.
     defscrollback 10000
+
+    # Without these, screen hands the program TERM=screen, which is 8 colours,
+    # and MCC's output collapses to a single red. Measured by sending a 24-bit
+    # escape through screen and reading it back on the far side: TERM=screen
+    # dropped it, screen-256color alone still dropped it, and only truecolor on
+    # let it through.
+    term screen-256color
+    truecolor on
   '';
 
   accountDir = name: "${cfg.stateDir}/accounts/${name}";
@@ -95,7 +104,7 @@ let
         # -D -m runs screen in the foreground without forking, so systemd
         # supervises the real thing rather than a daemon that ran away.
         ExecStart = lib.concatStringsSep " " [
-          "${lib.getExe pkgs.screen}"
+          "${lib.getExe' pkgs.screen "screen"}"
           "-c"
           screenrc
           "-D"
@@ -283,8 +292,9 @@ let
       Bots connect at boot on their own, staggered so the server does not reject
       them. They keep running when you detach or close SSH.
 
-      In dash, Ctrl-B then D leaves the whole window running and Ctrl-B then an
-      arrow key moves between bots. Inside one bot's console, Ctrl-A then D
+      In dash, click a pane to focus it and scroll with the wheel. Ctrl-B then D
+      leaves the whole window running, and Ctrl-B then an arrow key also moves
+      between bots. Inside one bot's console, Ctrl-A then D
       detaches from it. None of these stop a bot.
 
       say, chat, who, info, leave and cmd go through MCP, which MCC only runs
@@ -386,6 +396,9 @@ let
           tmux select-layout -t "$session:bots" tiled >/dev/null
           # A console that dies should leave a visible pane saying so, not
           # silently shrink the dashboard.
+          # Click a pane to focus it and use the wheel to scroll, instead of
+          # Ctrl-B and an arrow key for everything.
+          tmux set-option -t "$session" mouse on >/dev/null
           tmux set-window-option -t "$session:bots" remain-on-exit on >/dev/null
           tmux set-window-option -t "$session:bots" pane-border-status top >/dev/null
           tmux set-window-option -t "$session:bots" pane-border-format ' #{pane_title} ' >/dev/null
