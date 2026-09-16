@@ -185,6 +185,21 @@ let
 
       known() { accounts | grep -qxF "$1"; }
 
+      export SCREENDIR=${lib.escapeShellArg screenDir}
+
+      # True when that bot has a live console to attach to. The service can be
+      # active for a moment before screen has created its socket, so check both.
+      # compgen is not available in the bash writeShellApplication runs, so
+      # test the glob directly. An unmatched glob stays literal and fails -S.
+      console_ready() {
+        systemctl is-active --quiet "mcc-$1.service" || return 1
+        local socket
+        for socket in "$SCREENDIR"/*."mcc-$1"; do
+          [[ -S "$socket" ]] && return 0
+        done
+        return 1
+      }
+
       # "all" expands to every account; anything else must be a real one.
       resolve() {
         if [[ "$1" == all ]]; then
@@ -285,6 +300,8 @@ let
         restart <account|all>        Reconnect
         logs    <account> [-f|N]     Recent chat log, or follow it
         attach  <account>            The real MCC console for one bot
+        pane    <account>            As attach, but waits and reattaches if the
+                                     bot stops. This is what dash runs.
         dash                         Every bot tiled, one console each
         say     <account> <text>     Send chat or a server command
         cmd     <account> <command>  Run an MCC internal command
@@ -359,13 +376,36 @@ let
           # The real MCC console for one bot: chat scrolls in, you type into it.
           [[ $# -ge 1 ]] || { echo "usage: mcc attach <account>" >&2; exit 2; }
           known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
-          if ! systemctl is-active --quiet "mcc-$1.service"; then
+          if ! console_ready "$1"; then
             echo "$1 is not running. Start it with: mcc start $1" >&2
             exit 1
           fi
           echo "Attaching to $1. Ctrl-A then D detaches and leaves it running." >&2
-          exec env SCREENDIR=${lib.escapeShellArg screenDir} \
-            screen -r ${lib.escapeShellArg "mcc-"}"$1"
+          exec screen -r "mcc-$1"
+          ;;
+
+        pane)
+          # What dash runs in each pane. Unlike attach, this never gives up:
+          # stopping a bot destroys its screen session, which would otherwise
+          # kill the pane for good and leave you rebuilding the whole window.
+          [[ $# -ge 1 ]] || { echo "usage: mcc pane <account>" >&2; exit 2; }
+          known "$1" || { echo "Unknown account: $1" >&2; exit 1; }
+          account="$1"
+          while true; do
+            if console_ready "$account"; then
+              printf '\033[2J\033[H'
+              screen -r "mcc-$account" || true
+              # Session still present means you detached on purpose, so do not
+              # fight you for the pane.
+              if console_ready "$account"; then
+                printf '\n--- detached from %s. Press Enter to re-attach. ---\n' "$account"
+                read -r _ || sleep 5
+              fi
+            else
+              printf '\r\033[K%s is stopped. Waiting for it to come back...' "$account"
+              sleep 3
+            fi
+          done
           ;;
 
         dash)
@@ -383,7 +423,7 @@ let
           mapfile -t dash_accounts < <(accounts)
           first=1
           for account in "''${dash_accounts[@]}"; do
-            pane_command="$self attach $account"
+            pane_command="$self pane $account"
             if ((first)); then
               # Size the detached session up front. tmux refuses to split when
               # there is no room, which silently drops a bot.
