@@ -36,6 +36,11 @@
   # modules/network.nix opens SSH on Tailscale. This is the wired NIC.
   networking.firewall.interfaces.enp8s0.allowedTCPPorts = [ 22 ];
 
+  # Dev servers are reached from the laptop over the tailnet. Trusting the
+  # interface avoids editing the firewall every time a project picks a new
+  # port; nothing here is reachable from the LAN or the internet.
+  networking.firewall.trustedInterfaces = [ "tailscale0" ];
+
   time.timeZone = "Asia/Kolkata";
   i18n.defaultLocale = "en_US.UTF-8";
   console.keyMap = "us";
