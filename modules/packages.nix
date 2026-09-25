@@ -59,6 +59,7 @@
         bun
         fnm
         nodejs_24
+        pnpm
         python3
         rustup
         uv
