@@ -17,8 +17,8 @@ in
       timestamp_format = "long";
 
       snapshot_dir = "snapshots";
-      snapshot_preserve_min = "1d";
-      snapshot_preserve = "3d";
+      snapshot_preserve_min = "latest";
+      snapshot_preserve = "no";
 
       target_preserve_min = "no";
       target_preserve = "14d 8w 6m";
