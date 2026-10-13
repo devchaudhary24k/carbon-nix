@@ -30,6 +30,9 @@ inputs.disko.lib.testLib.makeDiskoTest {
             options = machine.succeed(f"findmnt --noheadings --output OPTIONS {path}")
             assert "compress=zstd:3" in options, f"{path} lost its compression: {options}"
             assert "noatime" in options, f"{path} lost noatime: {options}"
+            # The kernel prints discard=async when it is on and nothing when it is
+            # off, so the absence of the word is how nodiscard shows up here.
+            assert "discard" not in options, f"{path} has online discard on: {options}"
 
     with subtest("swap is a sibling of root, so snapshots of root exclude it"):
         machine.succeed("mkdir -p /mnt/btrfs-root")

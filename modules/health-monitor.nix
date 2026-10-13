@@ -179,6 +179,16 @@ let
         add_issue "LOAD: 15-minute load $load_15 exceeds twice the $cpu_cores CPU cores"
       fi
 
+      # Pressure stall information: the share of the last minute in which every
+      # task that could run was waiting on the disk. CPU and load look normal
+      # while this is high, which is how the 2026-10-13 stall went unnoticed.
+      if [[ -r /proc/pressure/io ]]; then
+        io_stall=$(awk '/^full/ { split($3, kv, "="); print kv[2] }' /proc/pressure/io)
+        if awk -v stall="$io_stall" 'BEGIN { exit !(stall > 25) }'; then
+          add_issue "IO: every task stalled on disk for $io_stall% of the last minute"
+        fi
+      fi
+
       if systemctl is-active --quiet postgresql.service &&
         ! runuser -u postgres -- psql --quiet --tuples-only \
           --command 'SELECT 1' postgres >/dev/null; then

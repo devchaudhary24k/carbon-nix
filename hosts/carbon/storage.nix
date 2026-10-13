@@ -17,6 +17,8 @@ in
       "subvolid=5"
       "compress=zstd:3"
       "noatime"
+      # Same filesystem as the subvolumes in disks.nix, so same discard policy.
+      "nodiscard"
     ];
   };
 
@@ -48,6 +50,36 @@ in
       "/"
       bulkPath
     ];
+  };
+
+  # Btrfs hands out space in 1 GiB chunks and never returns a half-empty one on
+  # its own. On 2026-10-13 the SSD had every byte allocated to chunks (1 MiB
+  # unallocated) while df still showed 58 GiB free, so the filesystem had no
+  # room to create new metadata chunks and was one bad day from ENOSPC. Moving
+  # the contents of nearly empty chunks into the free space of others hands
+  # those chunks back. This runs after the Sunday upgrade, docker prune and
+  # nix-gc have freed their space. A failed run shows up in the health check as
+  # a failed unit.
+  systemd.services.btrfs-balance-ssd = {
+    description = "Return nearly empty Btrfs chunks on the SSD to the unallocated pool";
+    serviceConfig = {
+      Type = "oneshot";
+      Nice = 19;
+      IOSchedulingClass = "idle";
+    };
+    path = [ pkgs.btrfs-progs ];
+    script = ''
+      btrfs balance start -dusage=10 -musage=10 /
+    '';
+  };
+
+  systemd.timers.btrfs-balance-ssd = {
+    description = "Weekly Btrfs chunk compaction on the SSD";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "Sun 07:30";
+      Persistent = true;
+    };
   };
 
   # Only run once the bulk disk really mounted. Without the condition a missing

@@ -14,9 +14,19 @@ let
     "noatime"
   ];
 
+  # Kernels since 6.2 turn on discard=async by default for any SSD that
+  # advertises TRIM. On this DRAM-less WD Green every queued TRIM stalled the
+  # whole filesystem (2026-10-13: btrfs-discard blocked in blkdev_issue_discard,
+  # the transaction commit queued behind it, and mysqld, dockerd, minio and sshd
+  # sessions hung for minutes). Trimming is left to services.fstrim, which runs
+  # once a week. The same options must appear on every mount of this filesystem,
+  # including /mnt/btrfs-root in storage.nix, because discard is a
+  # filesystem-wide setting.
+  ssdBtrfsOptions = btrfsOptions ++ [ "nodiscard" ];
+
   subvolume = mountpoint: {
     inherit mountpoint;
-    mountOptions = btrfsOptions;
+    mountOptions = ssdBtrfsOptions;
   };
 in
 
