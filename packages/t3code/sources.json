@@ -1,0 +1,11 @@
+{
+  "version": "0.1.8-nightly.20261106.4275",
+  "server": {
+    "url": "https://github.com/pingdotgg/t3code/releases/download/v0.1.8-nightly.20261106.4275/t3-0.1.8-nightly.20261106.4275-linux-x64.tar.gz",
+    "hash": "sha256-zSo6gkedSiHicFCxOKdWnWAakacNSpjBg98oge8ObrA="
+  },
+  "desktop": {
+    "url": "https://github.com/pingdotgg/t3code/releases/download/v0.1.8-nightly.20261106.4275/T3-Code-0.1.8-nightly.20261106.4275-x86_64.AppImage",
+    "hash": "sha256-BL5B76IHVjbDxa9p8Xn5i5EIfVuJvvcNQwGI04YP8yg="
+  }
+}
