@@ -1,6 +1,7 @@
 # Interactive shell and editor. These use programs.* rather than a package in
-# modules/packages.nix because each option installs the program and writes its
-# configuration in one place.
+# packages.nix because each option installs the program and writes its
+# configuration in one place. The user-level config (fish functions, starship,
+# nvim) comes from Home Manager.
 { lib, pkgs, ... }:
 
 {
@@ -9,12 +10,11 @@
 
     fish = {
       enable = true;
-      interactiveShellInit = ''
-        ${pkgs.fnm}/bin/fnm env --use-on-cd --shell fish | source
-      '';
       shellAliases = {
         ll = "eza --long --all --group-directories-first";
-        rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#$hostname";
+        # Builds, shows what changed, then switches. Reads the repo path from
+        # programs.nh.flake.
+        rebuild = "nh os switch";
       };
     };
 
@@ -31,6 +31,8 @@
     };
 
     yazi.enable = true;
+
+    ssh.startAgent = true;
   };
 
   # The stock unit leaves a stale socket behind after an unclean logout, which

@@ -1,16 +1,16 @@
-# The baseline every machine in this repo gets.
+# Every host imports all of this. core/ applies to every machine; everything
+# else stays off until a host switches it on in hosts/<name>/default.nix:
 #
-# Modules that only some machines want (databases, containers, snapshots,
-# health reporting, the development runtime) are imported by hosts/<name>
-# instead, so a future laptop does not inherit a Postgres server.
+#   my.dev.enable = true;
+#   my.desktop.enable = true;
+#
+# So adding a module here never changes a machine that did not ask for it.
 {
   imports = [
-    ./options.nix
-    ./auto-upgrade.nix
-    ./network.nix
-    ./nix.nix
-    ./observability.nix
-    ./packages.nix
-    ./shell.nix
+    ./core
+    ./dev.nix
+    ./desktop
+    ./services/mcc.nix
+    ./services/t3code.nix
   ];
 }
