@@ -15,6 +15,8 @@
   my = {
     dev.enable = true;
     desktop.enable = true;
+    # Set up as a second session; switch on to try it next to Plasma.
+    desktop.hyprland.enable = false;
     gaming.enable = true;
     secureBoot.enable = true;
     # The app runs its own local server and can also connect to carbon's.

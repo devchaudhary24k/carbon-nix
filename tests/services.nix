@@ -63,11 +63,18 @@ pkgs.testers.runNixOSTest {
       config = nodes.machine;
       user = config.my.user;
       enabled = cond: if cond then "True" else "False";
+      # The sessions the login screen offers. Only exists with a desktop.
+      sessionsDir =
+        if config.my.desktop.enable then
+          "${config.services.displayManager.sessionData.desktops}/share/wayland-sessions"
+        else
+          "";
     in
     ''
       user = "${user}"
       dev = ${enabled config.my.dev.enable}
       desktop = ${enabled config.my.desktop.enable}
+      hyprland = ${enabled (config.my.desktop.enable && config.my.desktop.hyprland.enable)}
       t3_server = ${enabled config.my.t3code.server.enable}
       t3_desktop = ${enabled config.my.t3code.desktop.enable}
       hub = ${enabled config.my.monitoring.hub.enable}
@@ -164,20 +171,26 @@ pkgs.testers.runNixOSTest {
               machine.succeed("mcc list | grep -x kartik")
 
       if desktop:
-          with subtest("desktop sessions and apps are installed"):
+          with subtest("KDE Plasma and apps are installed"):
               machine.wait_for_unit("display-manager.service")
-              # The sessions ly offers, from the directory its config names.
-              sessions = machine.succeed(
-                  "ls $(sed -n 's/^waylandsessions=//p' /etc/ly/config.ini)"
-              )
-              for session in ["hyprland-uwsm.desktop", "plasma.desktop"]:
-                  assert session in sessions, f"ly does not offer {session}: {sessions}"
-              for command in ["Hyprland", "hyprlock", "waybar", "ghostty", "steam", "firefox"]:
+              machine.succeed("systemctl cat display-manager.service | grep -q sddm")
+              sessions = machine.succeed("ls ${sessionsDir}")
+              assert "plasma.desktop" in sessions, f"no Plasma session: {sessions}"
+              for command in ["plasmashell", "dolphin", "ghostty", "steam", "firefox"]:
+                  machine.succeed(f"command -v {command}")
+
+      if hyprland:
+          with subtest("Hyprland is offered next to Plasma"):
+              assert "hyprland-uwsm.desktop" in sessions, f"no Hyprland session: {sessions}"
+              for command in ["Hyprland", "hyprlock", "waybar"]:
                   machine.succeed(f"command -v {command}")
               machine.succeed(f"test -e /home/{user}/.config/hypr/hyprland.lua")
-              machine.succeed(f"test -e /home/{user}/.config/hypr/monitors.lua")
               machine.succeed(f"test -e /home/{user}/.config/uwsm/env-hyprland")
               machine.succeed(f"test -e /home/{user}/.config/waybar/config.jsonc")
-              machine.succeed("grep -rq 'dri/amd-igpu' /etc/udev/rules.d/")
+      elif desktop:
+          with subtest("Hyprland stays off"):
+              assert "hyprland" not in sessions, f"Hyprland session present: {sessions}"
+              machine.fail("command -v Hyprland")
+              machine.fail(f"test -e /home/{user}/.config/hypr")
     '';
 }

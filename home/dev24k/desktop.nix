@@ -1,12 +1,13 @@
-# User-level desktop setup, only on machines with my.desktop.enable.
-#
-# The configuration files live in the dotfiles repo (home/hypr, home/waybar,
-# home/uwsm); this only links them into place. Each machine's monitor layout
-# is home/hypr/.config/hypr/monitors/<hostname>.lua, linked as monitors.lua.
+# User-level desktop setup.
 #
 # KDE Plasma rewrites its own config files constantly, and Nix-managed links
 # are read-only, so the KDE settings are linked by the dotfiles repo's Stow
 # helper instead: dots link
+#
+# With my.desktop.hyprland.enable, the Hyprland, Waybar and UWSM files from
+# the dotfiles repo (home/hypr, home/waybar, home/uwsm) are linked into place.
+# Each machine's monitor layout is home/hypr/.config/hypr/monitors/<hostname>.lua,
+# linked as monitors.lua.
 {
   inputs,
   lib,
@@ -25,7 +26,7 @@ let
 in
 
 {
-  config = lib.mkIf osConfig.my.desktop.enable {
+  config = lib.mkIf (osConfig.my.desktop.enable && osConfig.my.desktop.hyprland.enable) {
     xdg.configFile = {
       "hypr" = linkDir "hypr" "hypr";
       "waybar" = linkDir "waybar" "waybar";
@@ -34,8 +35,5 @@ in
     // lib.optionalAttrs (builtins.pathExists monitors) {
       "hypr/monitors.lua".source = monitors;
     };
-
-    # Dark theme for GTK and portal-aware apps.
-    dconf.settings."org/gnome/desktop/interface".color-scheme = "prefer-dark";
   };
 }
