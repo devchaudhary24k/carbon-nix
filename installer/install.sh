@@ -87,7 +87,7 @@ if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
   exit 1
 fi
 flake="$repo_root#$host"
-config="$flake.config"
+config="$repo_root#nixosConfigurations.$host.config"
 
 primary_user="$(nix "${nix_flags[@]}" eval --raw "$config.my.user")"
 secure_boot="$(
