@@ -160,7 +160,10 @@ in
         libxdamage
         libxext
         libxfixes
+        libxi
         libxrandr
+        libxrender
+        libxtst
         libxcb
         libxshmfence
       ];
