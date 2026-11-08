@@ -32,12 +32,44 @@ let
     pixman
   ];
 
+  # What a downloaded Chromium needs at runtime. A tool that ships its own
+  # browser, such as the T3 agent runtime, runs that binary through nix-ld
+  # rather than the store copy the variables below point at, so without these
+  # it stops at the first missing library instead of opening a page.
+  # `includePath` and `pkgConfigPath` leave them out: these are runtime
+  # libraries, not headers node-gyp compiles against.
+  browserLibraries = with pkgs; [
+    alsa-lib
+    at-spi2-atk
+    at-spi2-core
+    atk
+    cups
+    dbus
+    expat
+    libdrm
+    libgbm
+    libxkbcommon
+    libxshmfence
+    nspr
+    nss
+    xorg.libX11
+    xorg.libXcomposite
+    xorg.libXdamage
+    xorg.libXext
+    xorg.libXfixes
+    xorg.libXi
+    xorg.libXrandr
+    xorg.libXrender
+    xorg.libXtst
+    xorg.libxcb
+  ];
+
   includePath = lib.makeSearchPathOutput "dev" "include" nativeLibraries;
   pkgConfigPath = lib.makeSearchPathOutput "dev" "lib/pkgconfig" nativeLibraries;
 in
 
 {
-  inherit nativeLibraries;
+  inherit nativeLibraries browserLibraries;
 
   variables = {
     C_INCLUDE_PATH = includePath;

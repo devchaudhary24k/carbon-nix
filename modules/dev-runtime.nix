@@ -19,7 +19,7 @@ in
 {
   programs.nix-ld = {
     enable = true;
-    libraries = devEnv.nativeLibraries;
+    libraries = devEnv.nativeLibraries ++ devEnv.browserLibraries;
   };
 
   environment.sessionVariables = devEnv.variables;
