@@ -7,8 +7,6 @@
 { inputs, ... }:
 
 {
-  imports = [ ./desktop.nix ];
-
   home = {
     username = "dev24k";
     homeDirectory = "/home/dev24k";

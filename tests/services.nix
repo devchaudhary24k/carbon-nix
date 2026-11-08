@@ -75,6 +75,7 @@ pkgs.testers.runNixOSTest {
       dev = ${enabled config.my.dev.enable}
       desktop = ${enabled config.my.desktop.enable}
       hyprland = ${enabled (config.my.desktop.enable && config.my.desktop.hyprland.enable)}
+      plasma = ${enabled (config.my.desktop.enable && config.my.desktop.plasma.enable)}
       t3_server = ${enabled config.my.t3code.server.enable}
       t3_desktop = ${enabled config.my.t3code.desktop.enable}
       hub = ${enabled config.my.monitoring.hub.enable}
@@ -171,26 +172,28 @@ pkgs.testers.runNixOSTest {
               machine.succeed("mcc list | grep -x kartik")
 
       if desktop:
-          with subtest("KDE Plasma and apps are installed"):
+          with subtest("Desktop apps are installed"):
               machine.wait_for_unit("display-manager.service")
-              machine.succeed("systemctl cat display-manager.service | grep -q sddm")
               sessions = machine.succeed("ls ${sessionsDir}")
-              assert "plasma.desktop" in sessions, f"no Plasma session: {sessions}"
-              for command in ["plasmashell", "dolphin", "ghostty", "steam", "firefox"]:
+              for command in ["ghostty", "steam", "firefox", "code"]:
                   machine.succeed(f"command -v {command}")
 
       if hyprland:
-          with subtest("Hyprland is offered next to Plasma"):
+          with subtest("Hyprland is offered"):
               assert "hyprland-uwsm.desktop" in sessions, f"no Hyprland session: {sessions}"
-              for command in ["Hyprland", "hyprlock", "waybar"]:
+              for command in ["Hyprland", "hyprlock", "waybar", "fuzzel", "thunar"]:
                   machine.succeed(f"command -v {command}")
-              machine.succeed(f"test -e /home/{user}/.config/hypr/hyprland.lua")
-              machine.succeed(f"test -e /home/{user}/.config/uwsm/env-hyprland")
-              machine.succeed(f"test -e /home/{user}/.config/waybar/config.jsonc")
+              machine.succeed("test -e /etc/pam.d/ly && grep -q gnome_keyring /etc/pam.d/ly")
+
+      if plasma:
+          with subtest("KDE Plasma is offered, with SDDM"):
+              machine.succeed("systemctl cat display-manager.service | grep -q sddm")
+              assert "plasma.desktop" in sessions, f"no Plasma session: {sessions}"
+              machine.succeed("command -v plasmashell")
       elif desktop:
-          with subtest("Hyprland stays off"):
-              assert "hyprland" not in sessions, f"Hyprland session present: {sessions}"
-              machine.fail("command -v Hyprland")
-              machine.fail(f"test -e /home/{user}/.config/hypr")
+          with subtest("KDE Plasma stays off, ly is the login screen"):
+              machine.succeed("systemctl cat display-manager.service | grep -q ly")
+              assert "plasma" not in sessions, f"Plasma session present: {sessions}"
+              machine.fail("command -v plasmashell")
     '';
 }

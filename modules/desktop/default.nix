@@ -1,6 +1,10 @@
-# A graphical desktop: KDE Plasma 6 on Wayland, with SDDM as the login
-# screen. Hyprland can be added as a second session with
-# my.desktop.hyprland.enable (see hyprland.nix).
+# A graphical desktop: sound, Bluetooth, fonts, power and the apps. The
+# session itself is picked per host:
+#
+#   my.desktop.hyprland.enable   Hyprland, with ly as the login screen
+#   my.desktop.plasma.enable     KDE Plasma, with SDDM as the login screen
+#
+# With both on, SDDM offers both sessions.
 {
   config,
   lib,
@@ -16,20 +20,18 @@ in
   imports = [
     ./gaming.nix
     ./hyprland.nix
+    ./plasma.nix
   ];
 
-  options.my.desktop.enable = lib.mkEnableOption "the KDE Plasma desktop";
+  options.my.desktop.enable = lib.mkEnableOption "a graphical desktop";
 
   config = lib.mkIf cfg.enable {
-    services.desktopManager.plasma6.enable = true;
-
-    services.displayManager = {
-      sddm = {
-        enable = true;
-        wayland.enable = true;
-      };
-      defaultSession = "plasma";
-    };
+    assertions = [
+      {
+        assertion = cfg.hyprland.enable || cfg.plasma.enable;
+        message = "my.desktop.enable needs a session: set my.desktop.hyprland.enable or my.desktop.plasma.enable.";
+      }
+    ];
 
     programs.dconf.enable = true;
 

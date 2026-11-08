@@ -5,7 +5,7 @@ NixOS configuration for my machines, in one repo with one `flake.lock`.
 | Host       | What it is                                    | Notes                                                    |
 | ---------- | --------------------------------------------- | -------------------------------------------------------- |
 | `carbon`   | Headless AMD box, 240 GB SSD + 1 TB HDD       | Always on. T3 Code server, Minecraft bots, Beszel hub.   |
-| `nukebyte` | ASUS TUF A15 (FA506IC) laptop, usually docked | KDE Plasma, Secure Boot, TPM-unlocked encrypted disk |
+| `nukebyte` | ASUS TUF A15 (FA506IC) laptop, usually docked | Hyprland, Secure Boot, TPM-unlocked encrypted disk       |
 
 ## Layout
 
@@ -14,7 +14,7 @@ flake.nix            Inputs, and one nixosConfiguration per host
 hosts/<name>/        Everything true of exactly one machine: disks, hardware, switches
 modules/core/        Every machine: nix, user, shell, network, Tailscale, logs, boot
 modules/dev.nix      Compilers, runtimes, coding agents, Docker, nix-ld
-modules/desktop/     KDE Plasma, SDDM, audio, Bluetooth, apps, Steam; Hyprland (off)
+modules/desktop/     Hyprland or KDE Plasma, audio, Bluetooth, apps, Steam
 modules/services/    T3 Code, Minecraft bots
 home/dev24k/         Home Manager: links dotfiles into place
 packages/            Packages built here: t3code, vite-plus, minecraft-console-client
@@ -40,9 +40,11 @@ The rule that keeps this honest: a disk serial, an interface name, a hostname
 or a monitor layout goes in `hosts/<name>/`. If a file in `modules/` mentions
 carbon or nukebyte, it is in the wrong place.
 
-Configuration files for programs (fish, starship, git, KDE, Hyprland) live
-in the [dotfiles](https://github.com/devchaudhary24k/dotfiles) repo. This repo
-links them into place through Home Manager.
+Configuration files for programs (fish, starship, git, Hyprland) live in the
+[dotfiles](https://github.com/devchaudhary24k/dotfiles) repo. This repo links
+fish, starship and git into place through Home Manager; the rest, which you
+edit often, are linked by the dotfiles repo's own `dots link` so they stay
+writable.
 
 ## Everyday changes
 
@@ -246,18 +248,23 @@ asks for the recovery key. Re-enroll with the second command above.
 
 ### First login on nukebyte
 
-SDDM logs you into KDE Plasma. Plasma does not take its settings from Nix,
-so link your KDE settings from the dotfiles repo once:
+ly, a text login screen, starts Hyprland. Hyprland's config comes from the
+dotfiles repo; link it once, and from then on editing `~/.config/hypr`
+edits the repo:
 
 ```bash
 git clone https://github.com/devchaudhary24k/dotfiles ~/code/dotfiles
-~/code/dotfiles/bin/dots link
+~/code/dotfiles/bin/dots link hypr waybar uwsm
+hyprctl reload
 ```
 
-Hyprland is set up but off. To try it as a second session, set
-`my.desktop.hyprland.enable = true;` in `hosts/nukebyte/default.nix` and
-rebuild; SDDM then offers it in its session menu. Its configuration (keys,
-monitors, bar) is in the dotfiles repo under `home/hypr`.
+Super+Return opens a terminal and Super+D the launcher; the rest of the keys
+are in `hyprland.lua`. Monitor rules are in `monitors/nukebyte.lua` there;
+`hyprctl monitors` shows each monitor's name.
+
+To go back to KDE Plasma, set `my.desktop.plasma.enable = true;` in
+`hosts/nukebyte/default.nix` and rebuild. With both on, SDDM replaces ly and
+offers both sessions.
 
 Check the GPU bus IDs in `hosts/nukebyte/hardware.nix` against
 `lspci -D | grep -E 'VGA|3D'`. For games, set Steam's launch option to

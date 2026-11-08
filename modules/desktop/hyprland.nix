@@ -1,8 +1,8 @@
-# Hyprland as a second session next to KDE Plasma, off by default. With
-# my.desktop.hyprland.enable = true, SDDM offers it in its session menu.
+# Hyprland, with ly as the login screen (SDDM instead when Plasma is on too).
 #
-# The Hyprland configuration itself (keys, monitors, bar) lives in the
-# dotfiles repo and is linked into place by home/dev24k/desktop.nix.
+# This installs Hyprland and the tools its config starts. The config itself
+# (keys, monitors, bar) lives in the dotfiles repo under home/hypr, linked
+# with Stow so it stays editable: dots link hypr waybar uwsm
 {
   config,
   lib,
@@ -26,9 +26,13 @@ let
 in
 
 {
-  options.my.desktop.hyprland.enable = lib.mkEnableOption "Hyprland as an extra session";
+  options.my.desktop.hyprland.enable = lib.mkEnableOption "the Hyprland session";
 
   config = lib.mkIf (config.my.desktop.enable && cfg.enable) {
+    # A text login screen. Pick the session with the arrow keys on its top
+    # line; it remembers the last one.
+    services.displayManager.ly.enable = !config.my.desktop.plasma.enable;
+
     programs.hyprland = {
       enable = true;
       # Runs Hyprland as a proper systemd session, so apps started from it get
@@ -39,12 +43,17 @@ in
     programs.hyprlock.enable = true;
     # Asks for your password when an app needs root. Started by Hyprland.
     systemd.packages = [ pkgs.hyprpolkitagent ];
+    # Stores the passwords Chrome, VS Code and Bitwarden keep, unlocked by the
+    # login password.
+    services.gnome.gnome-keyring.enable = true;
+    # It would also replace the SSH agent; keep the one from modules/core/shell.nix.
+    services.gnome.gcr-ssh-agent.enable = false;
 
     # File chooser and other dialogs for GTK apps under Hyprland.
     xdg.portal.extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
 
-    # What Plasma has built in and Hyprland does not: file manager with
-    # thumbnails and trash, Bluetooth and network tray apps, bar,
+    # What a full desktop has built in and Hyprland does not: file manager
+    # with thumbnails and trash, Bluetooth and network tray apps, bar,
     # notifications, launcher, clipboard history, screenshots.
     programs.thunar.enable = true;
     services.gvfs.enable = true;
@@ -69,7 +78,7 @@ in
 
     # Stable names for the two GPUs on a hybrid laptop, so Hyprland can be
     # told which one renders. udev names them card0/card1 in whatever order
-    # the drivers load, which changes between boots. Plasma picks on its own.
+    # the drivers load, which changes between boots.
     services.udev.extraRules = lib.mkIf prime.offload.enable ''
       KERNEL=="card*", SUBSYSTEM=="drm", KERNELS=="${pciAddress prime.amdgpuBusId}", SYMLINK+="dri/amd-igpu"
       KERNEL=="card*", SUBSYSTEM=="drm", KERNELS=="${pciAddress prime.nvidiaBusId}", SYMLINK+="dri/nvidia-dgpu"
