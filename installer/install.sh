@@ -14,7 +14,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 host=""
 
 usage() {
-  cat <<'EOF'
+  cat <<'USAGE'
 Usage: sudo ./installer/install.sh --host <name>
 
 Options:
@@ -22,7 +22,7 @@ Options:
   -h, --help      Show this message.
 
 This erases every disk listed in hosts/<name>/disks.nix.
-EOF
+USAGE
 }
 
 available_hosts() {
@@ -78,12 +78,52 @@ if ! grep -q '^ID=nixos$' /etc/os-release; then
 fi
 
 nix_flags=(--extra-experimental-features 'nix-command flakes')
-flake="path:$repo_root#$host"
+
+# Installing from a clean Git checkout makes the system record the commit it
+# was built from. The auto-upgrade guard on carbon needs that.
+if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
+  echo "The checkout at $repo_root has uncommitted changes." >&2
+  echo "Commit or stash them first, so the installed system matches a commit on GitHub." >&2
+  exit 1
+fi
+flake="$repo_root#$host"
+config="$flake.config"
+
+primary_user="$(nix "${nix_flags[@]}" eval --raw "$config.my.user")"
+secure_boot="$(
+  nix "${nix_flags[@]}" eval --raw "$config.my.secureBoot.enable" \
+    --apply 'enabled: if enabled then "1" else "0"'
+)"
+
+# lanzaboote enrolls this machine's own Secure Boot keys on the first boot,
+# which the firmware only accepts while it is in Setup Mode.
+if [[ "$secure_boot" == 1 ]]; then
+  setup_mode=0
+  for var in /sys/firmware/efi/efivars/SetupMode-*; do
+    [[ -e "$var" ]] || continue
+    # Four bytes of attributes, then the one-byte value.
+    setup_mode="$(od -An -t u1 -j 4 -N 1 "$var" | tr -d ' ')"
+  done
+
+  if [[ "$setup_mode" != 1 ]]; then
+    cat >&2 <<'SETUP'
+The firmware is not in Secure Boot Setup Mode, so the keys this machine
+generates on its first boot cannot be enrolled.
+
+In the BIOS (press F2 at power-on), go to Security > Secure Boot > Key
+Management and clear the Secure Boot keys (on some firmware: delete the
+Platform Key). Save, then boot this installer again. Do not pick an option
+that also wipes the forbidden signature list (dbx).
+SETUP
+    read -r -p "Install anyway and enroll the keys later? [y/N] " answer
+    [[ "$answer" == [yY] ]] || exit 1
+  fi
+fi
 
 echo "Reading the disk layout from hosts/$host/disks.nix ..."
 mapfile -t target_disks < <(
   nix "${nix_flags[@]}" eval --raw \
-    "$flake.config.disko.devices.disk" \
+    "$config.disko.devices.disk" \
     --apply 'disks: builtins.concatStringsSep "\n" (map (d: d.device) (builtins.attrValues disks))'
   printf '\n'
 )
@@ -115,47 +155,52 @@ if [[ "$typed" != "$confirmation_phrase" ]]; then
 fi
 
 # One script, generated from the same disks.nix the installed system mounts.
-# It destroys the existing layout, formats, and mounts everything under /mnt.
+# It destroys the existing layout, formats (asking for the disk encryption
+# passphrase where there is one), and mounts everything under /mnt.
 echo "Building the disko script for $host ..."
 disko_script="$(
   nix "${nix_flags[@]}" build --no-link --print-out-paths \
-    "$flake.config.system.build.diskoScript"
+    "$config.system.build.diskoScript"
 )"
 
 echo "Partitioning and mounting ..."
 "$disko_script"
 
-echo "Copying the configuration to /mnt/etc/nixos ..."
-install -d -m 0755 /mnt/etc/nixos
-cp -a "$repo_root"/. /mnt/etc/nixos/
+# The checkout lives where `rebuild` (nh) looks for it.
+checkout="/home/$primary_user/code/carbon-nix"
+echo "Copying the repository to $checkout ..."
+install -d -m 0755 "/mnt$checkout"
+cp -a "$repo_root"/. "/mnt$checkout/"
 
 # hardware.nix is committed rather than generated, because disko already owns
 # the filesystems and the remaining hardware detection rarely changes. Compare
 # them so a new machine's differences are not silently ignored.
 generated_hardware="$(mktemp)"
-nixos-generate-config --root /mnt --show-hardware-config > "$generated_hardware"
+nixos-generate-config --root /mnt --show-hardware-config >"$generated_hardware"
 if ! diff -q \
-  <(grep -oE '"[a-z0-9_]+"' "/mnt/etc/nixos/hosts/$host/hardware.nix" | sort -u) \
+  <(grep -oE '"[a-z0-9_]+"' "$repo_root/hosts/$host/hardware.nix" | sort -u) \
   <(grep -oE '"[a-z0-9_]+"' "$generated_hardware" | sort -u) >/dev/null; then
   echo
   echo "Note: the detected hardware differs from hosts/$host/hardware.nix."
-  echo "Generated copy left at /mnt/etc/nixos/hosts/$host/hardware-detected.nix"
-  cp "$generated_hardware" "/mnt/etc/nixos/hosts/$host/hardware-detected.nix"
+  echo "Generated copy left at $checkout/hosts/$host/hardware-detected.nix"
+  cp "$generated_hardware" "/mnt$checkout/hosts/$host/hardware-detected.nix"
 fi
 rm -f "$generated_hardware"
 
 echo "Installing ..."
-nixos-install --flake "path:/mnt/etc/nixos#$host" --no-root-passwd
+nixos-install --flake "$flake" --no-root-passwd
 
-primary_user="$(
-  nix "${nix_flags[@]}" eval --raw "$flake.config.machine.primaryUser"
-)"
+nixos-enter --root /mnt -c "chown -R $primary_user:users /home/$primary_user"
+echo "Set the password for $primary_user (login screen and sudo):"
 nixos-enter --root /mnt -c "passwd $primary_user"
 
-cat <<EOF
+echo
+echo "Installed $host. Next steps: README.md, section \"After installing\"."
+if [[ "$secure_boot" == 1 ]]; then
+  cat <<'DONE'
 
-Installed $host. Next:
-  1. Reboot.
-  2. sudo tailscale up --ssh=false
-  3. sudo /etc/nixos/installer/setup-monitoring.sh
-EOF
+This machine uses Secure Boot. On its first boot it generates its keys,
+enrolls them and reboots once by itself. After that, enroll the TPM so the
+disk unlocks without the passphrase (README.md, "Unlock the disk with the TPM").
+DONE
+fi

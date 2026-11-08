@@ -1,189 +1,282 @@
 # carbon-nix
 
-NixOS configuration for my machines. One repo, one `flake.lock`, one host so
-far.
+NixOS configuration for my machines, in one repo with one `flake.lock`.
+
+| Host       | What it is                                    | Notes                                                    |
+| ---------- | --------------------------------------------- | -------------------------------------------------------- |
+| `carbon`   | Headless AMD box, 240 GB SSD + 1 TB HDD       | Always on. T3 Code server, Minecraft bots, Beszel hub.   |
+| `nukebyte` | ASUS TUF A15 (FA506IC) laptop, usually docked | Hyprland, Secure Boot, TPM-unlocked encrypted disk       |
 
 ## Layout
 
 ```
-flake.nix          Inputs, and one nixosConfiguration per host
-hosts/<name>/      Everything true of exactly one machine
-modules/           Everything a second machine could import unchanged
-home/              Home Manager, per user
-packages/          Packages built here because nixpkgs does not have them
-lib/               Nix helpers shared between modules and Home Manager
-installer/         Scripts for bare metal and for secrets that stay out of Git
-tests/             VM tests, run by nix flake check
+flake.nix            Inputs, and one nixosConfiguration per host
+hosts/<name>/        Everything true of exactly one machine: disks, hardware, switches
+modules/core/        Every machine: nix, user, shell, network, Tailscale, logs, boot
+modules/dev.nix      Compilers, runtimes, coding agents, Docker, nix-ld
+modules/desktop/     Hyprland or KDE Plasma, audio, Bluetooth, apps, Steam
+modules/services/    T3 Code, Minecraft bots
+home/dev24k/         Home Manager: links dotfiles into place
+packages/            Packages built here: t3code, vite-plus, minecraft-console-client
+installer/           Bare-metal install script
+tests/               VM tests, run by nix flake check
 ```
 
-The split between `hosts/` and `modules/` is the rule that keeps the repo
-honest. A disk serial, a network interface name, a hostname or a username goes
-in `hosts/<name>/`. If a file in `modules/` mentions carbon, it is in the wrong
-place.
-
-`modules/default.nix` lists what every machine gets. Anything else in
-`modules/` is opt-in, and `hosts/carbon/default.nix` imports the ones carbon
-wants. That is why Postgres is listed there and not in the baseline.
-
-Three values differ per machine and are needed by several shared modules, so
-they are options rather than literals. `modules/options.nix` defines them and
-`hosts/carbon/default.nix` sets them:
+Every host imports all of `modules/`. Anything outside `core/` stays off until
+the host switches it on in `hosts/<name>/default.nix`:
 
 ```nix
-machine = {
-  primaryUser = "dev24k";
-  bulkPath = "/srv/bulk";
-  btrfsRootPath = "/mnt/btrfs-root";
+my = {
+  dev.enable = true;
+  desktop.enable = true;
+  t3code.server.enable = true;
 };
 ```
+
+So a module only ever affects the machines that ask for it, and that file is
+the one place to see what a machine runs.
+
+The rule that keeps this honest: a disk serial, an interface name, a hostname
+or a monitor layout goes in `hosts/<name>/`. If a file in `modules/` mentions
+carbon or nukebyte, it is in the wrong place.
+
+Configuration files for programs (fish, starship, git, Hyprland) live in the
+[dotfiles](https://github.com/devchaudhary24k/dotfiles) repo. This repo links
+fish, starship and git into place through Home Manager; the rest, which you
+edit often, are linked by the dotfiles repo's own `dots link` so they stay
+writable.
 
 ## Everyday changes
 
 Edit, apply, commit, push:
 
 ```bash
-sudo nixos-rebuild switch --flake /etc/nixos#carbon   # or: rebuild
-git -C /etc/nixos commit -am "Add the thing"
-git -C /etc/nixos push
+rebuild                          # nh os switch: builds, shows what changed, switches
+git commit -am "Add the thing"
+git push
 ```
 
-Pushing is not optional. See the next section.
-
-## The weekly upgrade will revert anything you did not push
-
-`system.autoUpgrade` runs every Sunday at 04:00 and builds from
-`github:devchaudhary24k/carbon-nix#carbon`, the pushed repo, never from the
-local `/etc/nixos`. On 2026-09-13 that removed `claude-code`, `dotnet-sdk` and
-the `mcc-runtime` wrapper, because all three had been rebuilt by hand and never
-committed.
-
-`modules/auto-upgrade.nix` now runs a guard before the switch. It refuses to
-upgrade when `/etc/nixos` has uncommitted changes, or when the checkout does
-not match `origin/<branch>`. The upgrade unit fails instead of switching, the
-health check reports a failed unit, and the heartbeat tells you.
-
-Run the same check by hand at any time:
+`rebuild` builds whichever machine you are on. To change the other one from
+here:
 
 ```bash
-auto-upgrade-guard
+nixos-rebuild switch --flake .#carbon --target-host carbon --sudo
 ```
 
-To clear a blocked upgrade, push and then start it:
+To try something without keeping it, `nh os test` switches until the next
+reboot. Every rebuild is also a boot menu entry, so a broken change is undone
+by picking the previous entry at boot.
+
+### Updating packages
+
+Packages only change when `flake.lock` does:
 
 ```bash
-git -C /etc/nixos push
-sudo systemctl start nixos-upgrade
+nix flake update                  # everything
+nix flake update dotfiles         # after pushing to the dotfiles repo
+./packages/t3code/update.sh       # newest T3 Code nightly (--stable for releases)
+rebuild
 ```
 
-## Where packages go
+The OS follows the `nixos-26.05` release branch, which keeps receiving
+security fixes. A new release comes out every May and November; moving to it
+means changing `nixos-26.05` (and Home Manager's `release-26.05`) in
+`flake.nix`. Claude Code and Codex come from `nixos-unstable` so they stay
+current between releases.
 
-`modules/packages.nix` holds every system-wide package, grouped by what it is
-for. That is the file to edit.
+### Where packages go
 
-Three things deliberately live elsewhere:
+| Kind                                   | File                                      |
+| -------------------------------------- | ----------------------------------------- |
+| Command line tool for every machine    | `modules/core/packages.nix`               |
+| Development tool                       | `modules/dev.nix`                         |
+| Desktop app                            | `modules/desktop/default.nix`             |
+| Unfree package (Chrome, Steam, ...)    | also add its name to `my.unfree`          |
+| Not in nixpkgs                         | a new directory in `packages/`            |
 
-`programs.*` in `modules/shell.nix` installs neovim, fish, fzf, direnv and yazi
-along with their configuration. Adding them to the package list as well would
-install them twice.
+A downloaded binary that is not from Nix fails with `No such file or
+directory` because NixOS has no `/lib`. `programs.nix-ld` in `modules/dev.nix`
+fixes that for most of them; when one still fails on a missing `.so`, add the
+library to its list.
 
-A package that only exists to serve a systemd unit stays in the module that
-defines the unit. `health-check` in `modules/health-monitor.nix` is the only
-current example.
+## Carbon deploys itself
 
-`home/dev24k.nix` installs into `/etc/profiles/per-user/dev24k/bin`, which is
-on that user's PATH and nowhere else. `claude-code` is there. A root systemd
-unit cannot see it, which is correct for a CLI you run yourself.
+Every night at 04:00 carbon builds `github:devchaudhary24k/carbon-nix` (the
+`main` branch) and switches to it. It never reads a local checkout, so **a
+change reaches carbon once it is pushed to main**, and a change only rebuilt
+by hand would be reverted.
 
-## Installing software without Nix
+A guard stops that revert: it refuses to switch while carbon runs a system
+built from uncommitted changes or from a commit that is not on `main`. Check
+it by hand with `auto-upgrade-guard`, and read why it refused with
+`journalctl -u nixos-upgrade`.
 
-It works, and two things on carbon already depend on it: `/opt/mcc` and
-`~/.codex/packages/standalone`.
+Nukebyte does not deploy itself; it changes when you run `rebuild`.
 
-NixOS has no `/usr/lib` and no real `/lib`, so a downloaded binary cannot find
-its loader and fails with `No such file or directory`, which is about the
-loader and not about the binary. `programs.nix-ld` is enabled and installs a
-shim at `/lib64/ld-linux-x86-64.so.2` that supplies libraries instead. When
-something still fails on a missing `.so`, add the package to
-`programs.nix-ld.libraries` and rebuild.
+## Logs
 
-Anything under `$HOME` or `/opt` persists. Both sit on Btrfs subvolumes Nix
-never touches, and both are covered by the daily snapshots. What you give up is
-reproducibility, rollback and version pinning: wipe the machine and `/opt/mcc`
-does not come back.
+Everything stays on the machine. `modules/core/logging.nix` lists every
+command; the ones you will use most:
 
-Use Nix when the package is in nixpkgs. Use nix-ld plus a manual install for a
-vendor binary you need today. Package it properly, the way `packages/vite-plus`
-does, once you know you will depend on it. Keep manual installs under `/opt` or
-`~/.local` so there is one list of what sits outside Nix.
+```bash
+sysreport                         # one-page summary: failures, errors, disks, temps, traffic
+journalctl -b -p warning          # warnings and errors since boot
+journalctl -b -1 -p err           # errors from the previous boot
+sar -n DEV                        # network traffic per interface today, every 5 minutes
+atop -r                           # replay per-process CPU and memory history
+vnstat -d                         # data used per day
+```
 
-## Disks
+Beszel shows both machines on one dashboard at http://carbon:8090.
 
-`hosts/carbon/disks.nix` describes the partitions, filesystems, Btrfs
-subvolumes and mount options once. disko turns that into the commands the
-installer runs and into the `fileSystems` entries the running system mounts, so
-the two cannot drift.
+## Tailscale
 
-Carbon predates disko and its partitions are already named `ESP`, `nixos` and
-`bulk`. The `label` on each partition pins those names, because the generated
-`fileSystems` address partitions through `/dev/disk/by-partlabel/`.
+`modules/core/tailscale.nix` sets up Tailscale SSH, Taildrop, and on carbon
+an exit node and a route to the home LAN. Day to day:
 
-Swap is on its own subvolume. An active swapfile on the root subvolume would
-block snapshots of root.
+```bash
+ssh carbon                        # Tailscale SSH, no keys needed
+tailscale file cp photo.jpg carbon:   # Taildrop; lands in ~/Downloads/Taildrop
+tailscale set --exit-node=carbon  # send all traffic through home (public Wi-Fi)
+tailscale set --exit-node=        # stop
+tailscale serve 3000              # https://<machine>.<tailnet>.ts.net for your devices
+tailscale funnel 3000             # the same, on the public internet
+```
 
-## Installing on new hardware
+Every port on each machine is open to your own tailnet devices and nothing
+else, so dev servers are reachable as `http://carbon:<port>`.
+
+## T3 Code
+
+Carbon runs the T3 Code server as a user service (`systemctl --user status
+t3code`) on port 3773. Nukebyte has the desktop app, which runs its own local
+server and can also connect to carbon's. Both come from
+`packages/t3code/sources.json`, so they are always the same version. Update
+with `./packages/t3code/update.sh`, not `t3 update`.
+
+## Installing
+
+Boot the NixOS installer from USB, connect to the network, then:
 
 ```bash
 git clone https://github.com/devchaudhary24k/carbon-nix
 cd carbon-nix
-sudo ./installer/install.sh --host carbon
+sudo ./installer/install.sh --host <carbon|nukebyte>
 ```
 
-The script reads the disk list out of `hosts/carbon/disks.nix`, refuses to run
-outside a NixOS installer, refuses to touch a mounted disk, prints what it is
-about to erase, and requires the exact phrase `ERASE CARBON`. Then disko
-partitions and mounts, and `nixos-install` runs.
+The script reads the disks from `hosts/<host>/disks.nix`, refuses to touch a
+mounted disk, prints what it is about to erase, and requires the phrase
+`ERASE <HOST>`. disko partitions and formats, `nixos-install` runs, and you
+set your login password. The repo ends up in `~/code/carbon-nix`.
 
-Afterwards:
+### Before reinstalling carbon
+
+Both disks are wiped, including the 1 TB HDD (it changes from Btrfs to
+ext4). Copy off first:
+
+- `~/code` and anything else in your home directory you want to keep
+- `~/.t3` (T3 Code threads and settings) and `~/.claude`, `~/.codex`
+- `/opt/mcc/accounts` (bot logins and session tokens)
+- anything on `/srv/bulk` you want to keep
+
+Restore `/opt/mcc/accounts` and `~/.t3` after the install, before starting
+the bots and the T3 service.
+
+### Before installing nukebyte
+
+1. Copy off anything from Windows; the whole drive is erased.
+2. In the BIOS (F2 at power-on), under Security > Secure Boot > Key
+   Management, clear the Secure Boot keys so the firmware is in Setup Mode.
+   Do not pick an option that also wipes the forbidden signature list (dbx).
+3. Run the installer. It asks for a disk passphrase; this is temporary
+   until the TPM is enrolled, but keep it until then.
+
+### After installing
+
+On every machine:
 
 ```bash
-sudo tailscale up --ssh=false
-sudo /etc/nixos/installer/setup-monitoring.sh
+sudo tailscale up                 # log in once; the settings are applied automatically
 ```
 
-`setup-monitoring.sh` reads a Better Stack heartbeat URL without echoing it and
-writes it to `/etc/health-monitor/heartbeat-url`, mode 0600, outside Git. Until
-that file exists the health service is skipped.
+Then, in the Tailscale admin console:
+
+- approve carbon's exit node and subnet route (Machines > carbon > Edit route
+  settings), and turn off key expiry for carbon so it never drops off;
+- under Access controls, change the SSH rule's `"action": "check"` to
+  `"accept"` if the browser re-login every 12 hours for `ssh carbon` gets in
+  the way.
+
+Beszel: open http://carbon:8090, create the admin account, click "Add
+system", copy the public key into `my.monitoring.hubKey` in
+`modules/core/monitoring.nix`, push, and rebuild both machines. Then add each
+machine in the dialog by its Tailscale name, port 45876.
+
+On nukebyte, limit the battery to 80% since it lives on the charger:
+
+```bash
+asusctl battery limit 80
+```
+
+### Unlock the disk with the TPM (nukebyte)
+
+The first boot generates Secure Boot keys, enrolls them and reboots once by
+itself. Check it worked:
+
+```bash
+bootctl status | grep "Secure Boot"   # Secure Boot: enabled (user)
+```
+
+Then let the TPM unlock the disk, but only when Secure Boot is on and the
+keys are yours (PCR 7). Create a recovery key at the same time and store it
+in your password manager:
+
+```bash
+sudo systemd-cryptenroll /dev/nvme0n1p2 --recovery-key
+sudo systemd-cryptenroll /dev/nvme0n1p2 --tpm2-device=auto --tpm2-pcrs=7
+```
+
+Reboot; the disk unlocks with no prompt. Once that works, remove the
+install-time passphrase so only the TPM and the recovery key remain:
+
+```bash
+sudo systemd-cryptenroll /dev/nvme0n1p2 --wipe-slot=password
+```
+
+If Secure Boot is ever turned off or the keys change, the TPM refuses and boot
+asks for the recovery key. Re-enroll with the second command above.
+
+### First login on nukebyte
+
+ly, a text login screen, starts Hyprland. Hyprland's config comes from the
+dotfiles repo; link it once, and from then on editing `~/.config/hypr`
+edits the repo:
+
+```bash
+git clone https://github.com/devchaudhary24k/dotfiles ~/code/dotfiles
+~/code/dotfiles/bin/dots link hypr waybar uwsm
+hyprctl reload
+```
+
+Super+Return opens a terminal and Super+D the launcher; the rest of the keys
+are in `hyprland.lua`. Monitor rules are in `monitors/nukebyte.lua` there;
+`hyprctl monitors` shows each monitor's name.
+
+To go back to KDE Plasma, set `my.desktop.plasma.enable = true;` in
+`hosts/nukebyte/default.nix` and rebuild. With both on, SDDM replaces ly and
+offers both sessions.
+
+Check the GPU bus IDs in `hosts/nukebyte/hardware.nix` against
+`lspci -D | grep -E 'VGA|3D'`. For games, set Steam's launch option to
+`nvidia-offload gamemoderun %command%`.
 
 ## Adding a machine
 
-1. `mkdir hosts/<name>` and add `default.nix`, `hardware.nix` and `disks.nix`.
-2. Set `machine.primaryUser` and `networking.hostName`.
-3. Import the optional modules that machine wants.
-4. Add one line to `hosts` in `flake.nix`.
+1. `mkdir hosts/<name>` with `default.nix`, `hardware.nix` and `disks.nix`.
+2. Set `networking.hostName` and switch on the `my.*` features it needs.
+3. Add one line to `hosts` in `flake.nix`.
 
-That gives you `nixosConfigurations.<name>` and both VM tests for free.
-
-## Monitoring
-
-`modules/health-monitor.nix` checks the machine every five minutes and pings a
-Better Stack heartbeat. It reports failed units, critical services, database
-connectivity, mounts, disks above 90%, sustained CPU load, memory pressure,
-stale backups and snapshots, SMART warnings and recent OOM kills. A failing
-check posts the report body. A missed ping catches the machine being down.
-
-## Backups and snapshots
-
-btrbk snapshots root and home once a day at 03:30, keeps 3 days on the SSD, and
-sends them incrementally to the bulk disk where 14 daily, 8 weekly and 6
-monthly copies are kept. `/nix`, logs, Docker data and swap are separate
-subvolumes and are deliberately not snapshotted.
-
-Postgres, MariaDB and Valkey each dump weekly to the bulk disk and keep their
-five newest dumps. Postgres 18 ships pgvector; turn it on per database with
-`CREATE EXTENSION vector;`.
-
-Both Btrfs filesystems are scrubbed monthly. Docker images unused for seven
-days are pruned weekly. Docker volumes are never pruned automatically.
+That gives you `nixosConfigurations.<name>` and its VM test.
 
 ## Tests
 
@@ -191,29 +284,8 @@ days are pruned weekly. Docker volumes are never pruned automatically.
 nix flake check
 ```
 
-Two tests per host:
-
-`<host>-services` boots the real configuration in a VM with disposable mounts
-and checks that services start, databases answer, the package list is
-installed, Home Manager activated, backups trim to five files, and the upgrade
-guard blocks a dirty checkout.
-
-`<host>-disks` runs the real disko layout against scratch disks, installs, and
-boots from it. It checks each subvolume is mounted with the right options, the
-labels and partition labels exist, and a Btrfs snapshot can be sent from the
-SSD to the bulk disk.
-
-Nothing runs these automatically yet. The upgrade builds unattended at 04:00 on
-a Sunday, so running `nix flake check` before pushing is worth the wait.
-
-## Diagnostics
-
-```bash
-journalctl -b -1 -p warning
-journalctl -u hardware-inventory
-journalctl -u nixos-upgrade
-coredumpctl list
-sar -q
-sudo atop -r
-sudo smartctl -a /dev/sdb
-```
+`<host>-services` boots each host's configuration in a VM and checks that its
+services come up: Tailscale settings, Docker, the T3 server answering,
+Beszel, Home Manager links, the upgrade guard, the desktop sessions.
+`carbon-disks` partitions scratch disks with carbon's real layout, installs,
+and boots from them.

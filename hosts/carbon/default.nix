@@ -1,76 +1,56 @@
-# Carbon: headless AMD development box, 240 GB SSD plus 1 TB HDD.
+# Carbon: headless AMD development box, 240 GB SSD plus 1 TB HDD. Always on,
+# reached over Tailscale.
 #
 # Everything here is true of this machine and no other. Anything a second
 # machine could reuse belongs in modules/.
-{
-  inputs,
-  lib,
-  pkgs,
-  ...
-}:
+{ config, ... }:
 
 {
   imports = [
     ./disks.nix
     ./hardware.nix
-    ./storage.nix
-
-    # Optional shared modules this machine opts into.
-    ../../modules/containers.nix
-    ../../modules/databases.nix
-    ../../modules/dev-runtime.nix
-    ../../modules/health-monitor.nix
-    ../../modules/mcc.nix
-    ../../modules/snapshots.nix
   ];
 
-  machine = {
-    primaryUser = "dev24k";
-    bulkPath = "/srv/bulk";
-    btrfsRootPath = "/mnt/btrfs-root";
+  networking.hostName = "carbon";
+
+  my = {
+    dev.enable = true;
+    autoUpgrade.enable = true;
+    t3code.server.enable = true;
+    monitoring.hub.enable = true;
+
+    # Carbon is the always-on machine, so it is the exit node, and it makes
+    # the home LAN reachable from anywhere.
+    tailscale = {
+      exitNode = true;
+      subnetRoutes = [ "192.168.31.0/24" ];
+    };
   };
 
-  networking.hostName = "carbon";
-  networking.networkmanager.enable = true;
-
-  # modules/network.nix opens SSH on Tailscale. This is the wired NIC.
+  # SSH from the LAN on the wired NIC, as a fallback for when Tailscale is down.
   networking.firewall.interfaces.enp8s0.allowedTCPPorts = [ 22 ];
 
-  # Dev servers are reached from the laptop over the tailnet. Trusting the
-  # interface avoids editing the firewall every time a project picks a new
-  # port; nothing here is reachable from the LAN or the internet.
-  networking.firewall.trustedInterfaces = [ "tailscale0" ];
+  swapDevices = [
+    {
+      # Below zram in priority, so the SSD is only used once compressed RAM is
+      # full.
+      device = "/swapfile";
+      size = 8 * 1024;
+      priority = 10;
+    }
+  ];
 
-  time.timeZone = "Asia/Kolkata";
-  i18n.defaultLocale = "en_US.UTF-8";
-  console.keyMap = "us";
-
-  # Installed in UEFI mode. Ten entries is roughly two months of weekly
-  # upgrades to roll back through.
-  boot.loader.systemd-boot = {
-    enable = true;
-    configurationLimit = 10;
-  };
-  boot.loader.efi.canTouchEfiVariables = true;
-
-  hardware.enableRedistributableFirmware = true;
-  hardware.cpu.amd.updateMicrocode = true;
-  services.fstrim.enable = true;
-  services.fwupd.enable = true;
-
-  # Named one by one rather than allowUnfree, so a new unfree dependency has to
-  # be noticed and added here.
-  nixpkgs.config.allowUnfreePredicate =
-    pkg:
-    builtins.elem (lib.getName pkg) [
-      "claude-code"
-    ];
+  # Writable by the user, on the HDD.
+  systemd.tmpfiles.rules = [
+    "d /srv/bulk/datasets 2775 ${config.my.user} users -"
+    "d /srv/bulk/downloads 2775 ${config.my.user} users -"
+  ];
 
   # Minecraft bots. The account directories under /opt/mcc hold logins and
   # cached session tokens, so they are deliberately not managed by Nix.
   services.minecraft-mcc = {
     enable = true;
-    user = "dev24k";
+    user = config.my.user;
     accounts = {
       dev24k = { };
       devchaudhary24k = { };
@@ -79,24 +59,7 @@
     };
   };
 
-  users.users.dev24k = {
-    isNormalUser = true;
-    description = "Development user";
-    shell = pkgs.fish;
-    linger = true;
-    extraGroups = [
-      "docker"
-      "wheel"
-      "networkmanager"
-    ];
-
-    openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINgrNQxV5Klb6/QSnF9QNwYGTxmtXFZ3AnMlQNd4jwVS"
-    ];
-  };
-
-  home-manager.users.dev24k = import ../../home/dev24k.nix;
-
-  # Keep this unchanged after the initial installation.
+  # Set at install time. Leave it alone afterwards; it is not the NixOS
+  # version, it records which defaults this installation started with.
   system.stateVersion = "26.05";
 }
